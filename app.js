@@ -39,12 +39,18 @@ const elements = {};
 let uploadProgressHideTimer = 0;
 let aePopupWindow = null;
 
-document.addEventListener("DOMContentLoaded", () => {
+function initializeApplication() {
   bindElements();
   bindEvents();
   renderBlindModeToggle();
   renderAll();
-});
+}
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", initializeApplication, { once: true });
+} else {
+  initializeApplication();
+}
 
 function bindElements() {
   elements.fileInput                    = document.getElementById("excelFile");

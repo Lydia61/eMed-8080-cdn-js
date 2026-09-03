@@ -1,7 +1,7 @@
 {
   "app": {
     "name": "8080-305 数据整理工具",
-    "version": "20260903-1"
+    "version": "20260903-2"
   },
   "assets": {
     "css": "https://cdn.jsdelivr.net/gh/Lydia61/eMed-8080-cdn-js@main/styles.css",
