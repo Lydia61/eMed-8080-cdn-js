@@ -1,0 +1,15 @@
+{
+  "app": {
+    "name": "8080-305 数据整理工具",
+    "version": "20260903-1"
+  },
+  "assets": {
+    "css": "https://cdn.jsdelivr.net/gh/Lydia61/eMed-8080-cdn-js@main/styles.css",
+    "js": {
+      "app": "https://cdn.jsdelivr.net/gh/Lydia61/eMed-8080-cdn-js@main/app.js",
+      "edcParser": "https://cdn.jsdelivr.net/gh/Lydia61/eMed-8080-cdn-js@main/edc_parser.js",
+      "medicalEngine": "https://cdn.jsdelivr.net/gh/Lydia61/eMed-8080-cdn-js@main/medical_engine_labae.js"
+    },
+    "xlsx": "https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"
+  }
+}
