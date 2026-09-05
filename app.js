@@ -169,11 +169,17 @@ async function handleFileSelection(event) {
 
   state.blindMode = true;
   renderBlindModeToggle();
+  showUploadProgress(1, `已选择 ${files.length} 个文件，正在识别文件类型...`);
+  elements.workbookName.textContent = "正在识别上传文件...";
 
   try {
-    const classified = await Promise.all(files.map(async (file) => ({
+    const classified = await Promise.all(files.map(async (file, index) => ({
       file,
-      isCoding: await classifyFile(file),
+      isCoding: await classifyFile(file, ({ percent, message }) => {
+        const fileShare = 16 / files.length;
+        const overallPercent = 1 + ((index + percent / 100) * fileShare);
+        showUploadProgress(overallPercent, message);
+      }),
     })));
     const edcFile = classified.find((entry) => !entry.isCoding)?.file;
     const codingFiles = classified.filter((entry) => entry.isCoding).map((entry) => entry.file);
@@ -194,6 +200,7 @@ async function handleFileSelection(event) {
   } catch (error) {
     console.error(error);
     elements.workbookName.textContent = "文件读取失败，请确认文件格式和内容。";
+    showUploadProgress(100, `读取失败：${error.message || "未知错误"}`);
   }
 }
 
