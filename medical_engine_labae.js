@@ -1,7 +1,3 @@
-const MAPPING_FIELDS = ["EDC Labtest", "HRSTD LBTEST-EN", "HRSTD LBTEST-CN"];
-const LIBRARY_FIELDS = ["HRSTD LBTEST-EN", "HRSTD LBTEST-CN", "编码描述-CN", "检查PT"];
-const CTC_FIELDS = ["VERSION", "LBTOXCN", "LBTESTCD", "LBTEST_EN", "LBTEST_CN", "LBTOXDIR", "LBSTRESU", "GRADE1", "GRADE2", "GRADE3", "GRADE4"];
-
 function text(value) {
   return value === null || value === undefined ? "" : String(value).trim();
 }
@@ -28,49 +24,6 @@ function semanticMatch(left, right) {
     if (!a || !b || !ak || !bk) return false;
     return a.includes(b) || b.includes(a) || ak.includes(bk) || bk.includes(ak);
   }));
-}
-
-function findSheet(workbook, names) {
-  const wanted = names.map(normalize);
-  return workbook.SheetNames.find((name) => {
-    const current = normalize(name);
-    return wanted.some((candidate) => current === candidate || current.includes(candidate));
-  }) || "";
-}
-
-function readRows(workbook, sheetName, fields) {
-  if (!sheetName) return [];
-  const rows = window.XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: "", raw: false });
-  return rows.map((row) => {
-    const output = {};
-    fields.forEach((field) => {
-      const key = Object.keys(row).find((candidate) => normalize(candidate) === normalize(field));
-      output[field] = key ? text(row[key]) : "";
-    });
-    return output;
-  }).filter((row) => Object.values(row).some(Boolean));
-}
-
-function parseMappingWorkbook(workbook, fileName) {
-  const mappingSheet = findSheet(workbook, ["mapping关系与检查项一致性核查", "mapping关系", "mapping"]);
-  const librarySheet = findSheet(workbook, ["Mapping关系库", "mapping关系库"]);
-  const mapping = readRows(workbook, mappingSheet, MAPPING_FIELDS);
-  const mappingLibrary = readRows(workbook, librarySheet, LIBRARY_FIELDS);
-  const libraryKeys = new Set(mappingLibrary.map((row) =>
-    `${normalize(row["HRSTD LBTEST-EN"])}|${normalize(row["HRSTD LBTEST-CN"])}`
-  ));
-  const consistency = mapping.map((row) => ({
-    ...row,
-    consistency: libraryKeys.has(`${normalize(row["HRSTD LBTEST-EN"])}|${normalize(row["HRSTD LBTEST-CN"])}`)
-      ? "一致"
-      : "未找到对应检查项",
-  }));
-  return { fileName, mappingSheet, librarySheet, mapping, mappingLibrary, consistency };
-}
-
-function parseCtcWorkbook(workbook, fileName) {
-  const sheetName = findSheet(workbook, ["Criteria"]) || workbook.SheetNames[0] || "";
-  return { fileName, sheetName, grades: readRows(workbook, sheetName, CTC_FIELDS) };
 }
 
 function numeric(value) {
@@ -358,19 +311,6 @@ function buildLabaeAeLinked(patient) {
     });
   });
   return matches;
-}
-
-export async function parseLabAeFiles(mappingFile, ctcFile, readFileBuffer) {
-  const [mappingBuffer, ctcBuffer] = await Promise.all([
-    readFileBuffer(mappingFile),
-    readFileBuffer(ctcFile),
-  ]);
-  const mappingWorkbook = window.XLSX.read(mappingBuffer, { type: "array", cellDates: false });
-  const ctcWorkbook = window.XLSX.read(ctcBuffer, { type: "array", cellDates: false });
-  return {
-    mapping: parseMappingWorkbook(mappingWorkbook, mappingFile.name),
-    ctc: parseCtcWorkbook(ctcWorkbook, ctcFile.name),
-  };
 }
 
 export function deriveLabAe(patients, labAeData) {

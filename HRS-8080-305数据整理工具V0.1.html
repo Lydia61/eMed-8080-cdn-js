@@ -6,6 +6,11 @@
   <title>8080-305 数据整理工具</title>
   <script>
     const CDN_CONFIG_URL = "https://cdn.jsdelivr.net/gh/Lydia61/eMed-8080-cdn-js@main/config.json";
+    const CDN_COMMIT = "9861ec0125a82534b84cf4fbe7820b88ce6d3014";
+
+    function pinCdnVersion(url) {
+      return String(url).replace("@main/", `@${CDN_COMMIT}/`);
+    }
 
     function loadStylesheet(url) {
       return new Promise((resolve, reject) => {
@@ -31,18 +36,18 @@
 
     async function bootApplication() {
       try {
-        const response = await fetch(`${CDN_CONFIG_URL}?v=20260903-1`, { cache: "no-store" });
+        const version = "20260903-2";
+        const response = await fetch(`${CDN_CONFIG_URL}?v=${version}`, { cache: "no-store" });
         if (!response.ok) throw new Error(`配置加载失败：HTTP ${response.status}`);
         const config = await response.json();
-        const cssUrl = config?.assets?.css;
-        const xlsxUrl = config?.assets?.xlsx;
-        const appUrl = config?.assets?.js?.app;
-        if (!cssUrl || !xlsxUrl || !appUrl) {
+        const cssUrl = pinCdnVersion(config?.assets?.css || "");
+        const appUrl = pinCdnVersion(config?.assets?.js?.app || "");
+        if (!cssUrl || !appUrl) {
           throw new Error("config.json 缺少必要的资源地址配置");
         }
         await loadStylesheet(cssUrl);
-        await loadScript(xlsxUrl);
-        await loadScript(`${appUrl}?v=${encodeURIComponent(config.app?.version || "latest")}`, { module: true });
+        const appVersion = config.app?.version || version;
+        await loadScript(`${appUrl}?v=${encodeURIComponent(appVersion)}&refresh=${Date.now()}`, { module: true });
       } catch (error) {
         console.error(error);
         document.body.innerHTML = `

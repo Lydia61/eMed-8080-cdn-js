@@ -2,8 +2,14 @@
 // 基于 A1811-312 实验室数据整理工具 V0.4 改造
 // 主要变更：Sheet 识别改为中文名称，字段映射全部改为中文 EDC 字段
 
-import { configureEdcParser, parseEdcWorkbook } from "./edc_parser.js";
-import { deriveLabAe, getReadOnlyLabAeApi, parseLabAeFiles } from "./medical_engine_labae.js?v=20260902-9";
+import {
+  classifyFile,
+  configureEdcParser,
+  parseAeCodingFile,
+  parseEdcWorkbook,
+  parseLabAeFiles,
+} from "./edc_parser.js";
+import { deriveLabAe, getReadOnlyLabAeApi } from "./medical_engine_labae.js?v=20260902-9";
 
 const state = {
   workbookName: "",
@@ -142,7 +148,9 @@ async function handleLabAeFileSelection() {
   }
   try {
     elements.labAeStatus.textContent = "正在解析 Lab-AE 文件...";
-    state.labAeData = await parseLabAeFiles(mappingFile, ctcFile, readFileBuffer);
+    state.labAeData = await parseLabAeFiles(mappingFile, ctcFile, ({ percent, message }) => {
+      showUploadProgress(percent, message);
+    });
     if (state.patients.size) {
       deriveLabAe(state.patients, state.labAeData);
       renderAll();
@@ -165,7 +173,7 @@ async function handleFileSelection(event) {
   try {
     const classified = await Promise.all(files.map(async (file) => ({
       file,
-      isCoding: await isAeCodingFile(file),
+      isCoding: await classifyFile(file),
     })));
     const edcFile = classified.find((entry) => !entry.isCoding)?.file;
     const codingFiles = classified.filter((entry) => entry.isCoding).map((entry) => entry.file);
@@ -189,35 +197,6 @@ async function handleFileSelection(event) {
   }
 }
 
-async function isAeCodingFile(file) {
-  const buffer = await readFileBuffer(file, () => {});
-  const workbook = window.XLSX.read(buffer, { type: "array", cellDates: false });
-  const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-  const rows = window.XLSX.utils.sheet_to_json(firstSheet, { header: 1, defval: "", raw: false });
-  const headers = new Set((rows[0] || []).map((value) => String(value).trim().toLowerCase()));
-  return headers.has("subject code") && headers.has("sn");
-}
-
-async function parseAeCodingFile(file) {
-  const buffer = await readFileBuffer(file, () => {});
-  const workbook = window.XLSX.read(buffer, { type: "array", cellDates: false });
-  const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-  const rows = window.XLSX.utils.sheet_to_json(firstSheet, { defval: "", raw: false });
-  const codingMap = new Map();
-  rows.forEach((row) => {
-    const subjectCode = String(row["Subject Code"] || "").trim();
-    const sequence = String(row.Sn ?? "").trim();
-    if (!subjectCode || !sequence) return;
-    codingMap.set(`${subjectCode}|${sequence}`, {
-      lltCn: String(row.LLT_CN || "").trim(),
-      ptCn: String(row.PT_CN || "").trim(),
-      ptCode: String(row["PT Code"] || "").trim(),
-      socCn: String(row.SOC_CN || "").trim(),
-    });
-  });
-  return codingMap;
-}
-
 function applyAeCoding(patients) {
   patients.forEach((patient) => {
     patient.aeList.forEach((ae) => {
@@ -231,10 +210,6 @@ function applyAeCoding(patients) {
 }
 
 async function parseWorkbook(file) {
-  if (!window.XLSX) {
-    elements.workbookName.textContent = "未检测到 Excel 解析库，请检查网络后刷新页面。";
-    return;
-  }
   try {
     showUploadProgress(4, "准备读取文件...");
     elements.workbookName.textContent = "正在载入 EDC 数据...";
@@ -267,18 +242,6 @@ async function parseWorkbook(file) {
     showUploadProgress(100, "读取失败，请检查文件格式");
     elements.workbookName.textContent = "Excel 读取失败，请确认文件格式和工作表内容。";
   }
-}
-
-function readFileBuffer(file, onProgress = () => {}) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onprogress = (event) => {
-      if (event.lengthComputable) onProgress(event.loaded, event.total);
-    };
-    reader.onerror = () => reject(reader.error || new Error("文件读取失败"));
-    reader.onload  = () => resolve(reader.result);
-    reader.readAsArrayBuffer(file);
-  });
 }
 
 function showUploadProgress(percent, message) {
@@ -2191,7 +2154,6 @@ function escapeAttribute(value) {
 
 configureEdcParser({
   createWorkerSource: createParserWorkerSource,
-  readFileBuffer,
   finalizePatient,
 });
 
