@@ -6,7 +6,11 @@ export function configureEdcParser(dependencies) {
 }
 
 function getParserWorkerUrl() {
-  if (!parserWorkerUrl) parserWorkerUrl = new URL("./parser.worker.js", import.meta.url);
+  if (!parserWorkerUrl) {
+    const workerScriptUrl = new URL("./parser.worker.js", import.meta.url).href;
+    const bootstrapSource = `importScripts(${JSON.stringify(workerScriptUrl)});`;
+    parserWorkerUrl = URL.createObjectURL(new Blob([bootstrapSource], { type: "text/javascript" }));
+  }
   return parserWorkerUrl;
 }
 
