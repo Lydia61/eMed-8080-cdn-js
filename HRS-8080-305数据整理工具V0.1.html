@@ -4,62 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>8080-305 数据整理工具</title>
-  <script>
-    const CDN_CONFIG_URL = "https://cdn.jsdelivr.net/gh/Lydia61/eMed-8080-cdn-js@main/config.json";
-
-    function pinCdnVersion(url) {
-      return String(url);
-    }
-
-    function loadStylesheet(url) {
-      return new Promise((resolve, reject) => {
-        const link = document.createElement("link");
-        link.rel = "stylesheet";
-        link.href = url;
-        link.onload = resolve;
-        link.onerror = () => reject(new Error(`CSS 加载失败：${url}`));
-        document.head.appendChild(link);
-      });
-    }
-
-    function loadScript(url, { module = false } = {}) {
-      return new Promise((resolve, reject) => {
-        const script = document.createElement("script");
-        if (module) script.type = "module";
-        script.src = url;
-        script.onload = resolve;
-        script.onerror = () => reject(new Error(`脚本加载失败：${url}`));
-        document.head.appendChild(script);
-      });
-    }
-
-    async function bootApplication() {
-      try {
-        const version = "20260903-2";
-        const response = await fetch(`${CDN_CONFIG_URL}?v=${version}`, { cache: "no-store" });
-        if (!response.ok) throw new Error(`配置加载失败：HTTP ${response.status}`);
-        const config = await response.json();
-        const cssUrl = pinCdnVersion(config?.assets?.css || "");
-        const appUrl = pinCdnVersion(config?.assets?.js?.app || "");
-        if (!cssUrl || !appUrl) {
-          throw new Error("config.json 缺少必要的资源地址配置");
-        }
-        await loadStylesheet(cssUrl);
-        const appVersion = config.app?.version || version;
-        await loadScript(`${appUrl}?v=${encodeURIComponent(appVersion)}&refresh=${Date.now()}`, { module: true });
-      } catch (error) {
-        console.error(error);
-        document.body.innerHTML = `
-          <main style="max-width:720px;margin:12vh auto;padding:24px;font:16px/1.6 sans-serif;color:#172033">
-            <h1>工具加载失败</h1>
-            <p>请确认当前电脑可以访问 GitHub 和 jsDelivr，然后刷新页面。</p>
-            <p style="color:#b42318;word-break:break-word">${String(error.message || error)}</p>
-          </main>`;
-      }
-    }
-
-    bootApplication();
-  </script>
+  <link rel="stylesheet" href="./styles.css">
+  <script type="module" src="./app.js"></script>
 </head>
 <body>
   <div class="app-shell">
@@ -105,6 +51,12 @@
           <span class="upload-title">上传 lab-ctc-grade 文件</span>
           <span class="upload-subtitle">读取 CTC 分级字段</span>
         </label>
+        <div id="labAeProgress" class="upload-progress" hidden>
+          <div class="upload-progress-track" aria-hidden="true">
+            <span id="labAeProgressBar" class="upload-progress-bar"></span>
+          </div>
+          <p id="labAeProgressText" class="upload-progress-text">准备读取 Lab-AE 文件...</p>
+        </div>
         <p id="labAeStatus" class="panel-note">尚未载入 Lab-AE 文件。</p>
       </section>
 
@@ -132,15 +84,6 @@
       </section>
 
       <section class="panel question-panel sidebar-question-panel">
-        <div class="section-head compact">
-          <div>
-            <p class="section-kicker">Query Lens</p>
-            <h2>数据提示</h2>
-          </div>
-        </div>
-        <div id="questionPanel" class="question-list sidebar-question-list">
-          <article class="question-empty">上传 Excel 后将自动提示缺失字段与异常结果。</article>
-        </div>
         <div class="ctcae-reference">
           <div class="ctcae-head">
             <p class="section-kicker">CTCAE Quick Ref</p>
@@ -185,6 +128,7 @@
             <div id="aeActionBar"></div>
             <div id="cmActionBar"></div>
             <div id="labAeActionBar"></div>
+            <div id="questionActionBar"></div>
           </div>
         </div>
         <div class="hero-hint">

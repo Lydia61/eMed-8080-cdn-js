@@ -9,7 +9,10 @@ function text(value) {
 }
 
 function normalize(value) {
-  return text(value).toLowerCase().replace(/[\s_\-/()[\]{}、，,;；:：]+/g, "");
+  return text(value)
+    .toLowerCase()
+    .replace(/gamma[-\s]*glutamyl[-\s]*transferase|γ[-\s]*谷氨酰基?转移酶?|伽马[-\s]*谷氨酰基?转移酶?|谷氨酰基转移酶|谷氨酰转移酶|ggt/g, "谷氨酰转移酶")
+    .replace(/[\s_\-/()[\]{}、，,;；:：]+/g, "");
 }
 
 function findSheet(workbook, names) {

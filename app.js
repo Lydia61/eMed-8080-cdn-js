@@ -9,7 +9,7 @@ import {
   parseEdcWorkbook,
   parseLabAeFiles,
 } from "./edc_parser.js";
-import { deriveLabAe, getReadOnlyLabAeApi } from "./medical_engine_labae.js?v=20260902-9";
+import { deriveLabAe, getReadOnlyLabAeApi } from "./medical_engine_labae.js?v=20260907-1";
 
 const state = {
   workbookName: "",
@@ -43,7 +43,9 @@ const patientIdPattern = /CN\d{5,7}/i;
 
 const elements = {};
 let uploadProgressHideTimer = 0;
+let labAeProgressHideTimer = 0;
 let aePopupWindow = null;
+let labAeParsing = false;
 
 function initializeApplication() {
   bindElements();
@@ -74,7 +76,6 @@ function bindElements() {
   elements.selectedPatientStratification= document.getElementById("selectedPatientStratification");
   elements.heroHintContent              = document.getElementById("heroHintContent");
   elements.baselineGrid                 = document.getElementById("baselineGrid");
-  elements.questionPanel                = document.getElementById("questionPanel");
   elements.historyList                  = document.getElementById("historyList");
   elements.systemicList                 = document.getElementById("systemicList");
   elements.responseList                 = document.getElementById("responseList");
@@ -83,9 +84,13 @@ function bindElements() {
   elements.aeActionBar                  = document.getElementById("aeActionBar");
   elements.cmActionBar                  = document.getElementById("cmActionBar");
   elements.labAeActionBar               = document.getElementById("labAeActionBar");
+  elements.questionActionBar            = document.getElementById("questionActionBar");
   elements.uploadDropzone               = document.querySelector(".upload-dropzone");
   elements.labAeMappingInput            = document.getElementById("labAeMappingFile");
   elements.labAeCtcInput                = document.getElementById("labAeCtcFile");
+  elements.labAeProgress                = document.getElementById("labAeProgress");
+  elements.labAeProgressBar             = document.getElementById("labAeProgressBar");
+  elements.labAeProgressText             = document.getElementById("labAeProgressText");
   elements.labAeStatus                 = document.getElementById("labAeStatus");
   elements.blindModeToggle             = document.getElementById("blindModeToggle");
   elements.blindModeLabel              = document.getElementById("blindModeLabel");
@@ -140,6 +145,7 @@ function renderBlindModeToggle() {
 }
 
 async function handleLabAeFileSelection() {
+  if (labAeParsing) return;
   const mappingFile = elements.labAeMappingInput.files[0];
   const ctcFile = elements.labAeCtcInput.files[0];
   if (!mappingFile || !ctcFile) {
@@ -148,18 +154,25 @@ async function handleLabAeFileSelection() {
   }
   try {
     elements.labAeStatus.textContent = "正在解析 Lab-AE 文件...";
+    showLabAeProgress(1, "准备读取 Lab-AE 文件...");
     state.labAeData = await parseLabAeFiles(mappingFile, ctcFile, ({ percent, message }) => {
-      showUploadProgress(percent, message);
+      showLabAeProgress(percent, message);
     });
     if (state.patients.size) {
+      labAeParsing = true;
       deriveLabAe(state.patients, state.labAeData);
       renderAll();
     }
     elements.labAeStatus.textContent = `已解析：Mapping ${state.labAeData.mapping.mapping.length} 行，检查项库 ${state.labAeData.mapping.mappingLibrary.length} 行，CTC ${state.labAeData.ctc.grades.length} 行。`;
+    showLabAeProgress(100, "解析完成");
+    scheduleHideLabAeProgress();
     window.dispatchEvent(new CustomEvent("lab-ae-data-ready", { detail: { data: state.labAeData, patients: state.patients } }));
   } catch (error) {
     console.error(error);
     elements.labAeStatus.textContent = "Lab-AE 文件解析失败，请检查工作表名称和字段。";
+    showLabAeProgress(100, "解析失败，请检查文件格式");
+  } finally {
+    labAeParsing = false;
   }
 }
 
@@ -259,6 +272,14 @@ function showUploadProgress(percent, message) {
   elements.uploadProgressText.textContent = `${safePercent}% · ${message}`;
 }
 
+function showLabAeProgress(percent, message) {
+  clearLabAeProgressHideTimer();
+  const safePercent = Math.max(0, Math.min(100, Math.round(percent)));
+  elements.labAeProgress.hidden = false;
+  elements.labAeProgressBar.style.width = `${safePercent}%`;
+  elements.labAeProgressText.textContent = `${safePercent}% · ${message}`;
+}
+
 function clearUploadProgressHideTimer() {
   if (uploadProgressHideTimer) {
     window.clearTimeout(uploadProgressHideTimer);
@@ -273,6 +294,23 @@ function scheduleHideUploadProgress() {
     elements.uploadProgressBar.style.width = "0%";
     elements.uploadProgressText.textContent = "准备读取文件...";
     uploadProgressHideTimer = 0;
+  }, 900);
+}
+
+function clearLabAeProgressHideTimer() {
+  if (labAeProgressHideTimer) {
+    window.clearTimeout(labAeProgressHideTimer);
+    labAeProgressHideTimer = 0;
+  }
+}
+
+function scheduleHideLabAeProgress() {
+  clearLabAeProgressHideTimer();
+  labAeProgressHideTimer = window.setTimeout(() => {
+    elements.labAeProgress.hidden = true;
+    elements.labAeProgressBar.style.width = "0%";
+    elements.labAeProgressText.textContent = "准备读取 Lab-AE 文件...";
+    labAeProgressHideTimer = 0;
   }, 900);
 }
 
@@ -715,16 +753,16 @@ function createParserWorkerSource() {
       const isAesi     = pickValue(accessor, ['是否是特别关注的不良事件', /是否是特别关注的不良事件/]);
       // 5种药物：关系+措施全部保留（含不适用/剂量不变，对照组才能正确显示）
       const drugInfoList = [
-        { drug: 'HRS-8080', ac: '对HRS-8080采取措施', re: '与HRS-8080的关系' },
-        { drug: '来曲唑',   ac: '对来曲唑采取措施',   re: '与来曲唑的关系' },
-        { drug: '阿那曲唑', ac: '对阿那曲唑采取措施', re: '与阿那曲唑的关系' },
-        { drug: '依西美坦', ac: '对依西美坦采取措施', re: '与依西美坦的关系' },
-        { drug: '他莫昔芬', ac: '对他莫昔芬采取措施', re: '与他莫昔芬的关系' },
+        { drug: '盲态药物A', actionKey: '对盲态药物A采取措施', relationKey: '与盲态药物A的关系', legacyActionKey: '对HRS-8080采取措施', legacyRelationKey: '与HRS-8080的关系' },
+        { drug: '盲态药物B', actionKey: '对盲态药物B采取措施', relationKey: '与盲态药物B的关系', legacyActionKey: '对来曲唑采取措施', legacyRelationKey: '与来曲唑的关系' },
+        { drug: '盲态药物C', actionKey: '对盲态药物C采取措施', relationKey: '与盲态药物C的关系', legacyActionKey: '对阿那曲唑采取措施', legacyRelationKey: '与阿那曲唑的关系' },
+        { drug: '盲态药物D', actionKey: '对盲态药物D采取措施', relationKey: '与盲态药物D的关系', legacyActionKey: '对依西美坦采取措施', legacyRelationKey: '与依西美坦的关系' },
+        { drug: '盲态药物E', actionKey: '对盲态药物E采取措施', relationKey: '与盲态药物E的关系', legacyActionKey: '对他莫昔芬采取措施', legacyRelationKey: '与他莫昔芬的关系' },
       ];
       const drugDetails = [];
-      drugInfoList.forEach(({ drug, ac, re }) => {
-        const action = pickValue(accessor, [ac]);
-        const rel    = pickValue(accessor, [re]);
+      drugInfoList.forEach(({ drug, actionKey, relationKey, legacyActionKey, legacyRelationKey }) => {
+        const action = pickValue(accessor, [actionKey, legacyActionKey]);
+        const rel    = pickValue(accessor, [relationKey, legacyRelationKey]);
         if (action || rel) {
           drugDetails.push({ drug, action: action || '', rel: rel || '' });
           if (action && action !== '剂量不变' && action !== '不适用') {
@@ -747,16 +785,16 @@ function createParserWorkerSource() {
         isAesi:            isAesi || '',
         drugDetails,
         'AE转归': outcome || '',
-        '对HRS-8080采取措施': drugDetails.find((item) => item.drug === 'HRS-8080')?.action || '',
-        '与HRS-8080的关系': drugDetails.find((item) => item.drug === 'HRS-8080')?.rel || '',
-        '对来曲唑采取措施': drugDetails.find((item) => item.drug === '来曲唑')?.action || '',
-        '与来曲唑的关系': drugDetails.find((item) => item.drug === '来曲唑')?.rel || '',
-        '对阿那曲唑采取措施': drugDetails.find((item) => item.drug === '阿那曲唑')?.action || '',
-        '与阿那曲唑的关系': drugDetails.find((item) => item.drug === '阿那曲唑')?.rel || '',
-        '对依西美坦采取措施': drugDetails.find((item) => item.drug === '依西美坦')?.action || '',
-        '与依西美坦的关系': drugDetails.find((item) => item.drug === '依西美坦')?.rel || '',
-        '对他莫昔芬采取措施': drugDetails.find((item) => item.drug === '他莫昔芬')?.action || '',
-        '与他莫昔芬的关系': drugDetails.find((item) => item.drug === '他莫昔芬')?.rel || '',
+        '对盲态药物A采取措施': drugDetails.find((item) => item.drug === '盲态药物A')?.action || '',
+        '与盲态药物A的关系': drugDetails.find((item) => item.drug === '盲态药物A')?.rel || '',
+        '对盲态药物B采取措施': drugDetails.find((item) => item.drug === '盲态药物B')?.action || '',
+        '与盲态药物B的关系': drugDetails.find((item) => item.drug === '盲态药物B')?.rel || '',
+        '对盲态药物C采取措施': drugDetails.find((item) => item.drug === '盲态药物C')?.action || '',
+        '与盲态药物C的关系': drugDetails.find((item) => item.drug === '盲态药物C')?.rel || '',
+        '对盲态药物D采取措施': drugDetails.find((item) => item.drug === '盲态药物D')?.action || '',
+        '与盲态药物D的关系': drugDetails.find((item) => item.drug === '盲态药物D')?.rel || '',
+        '对盲态药物E采取措施': drugDetails.find((item) => item.drug === '盲态药物E')?.action || '',
+        '与盲态药物E的关系': drugDetails.find((item) => item.drug === '盲态药物E')?.rel || '',
       });
     }
 
@@ -793,6 +831,7 @@ function createParserWorkerSource() {
         collectionDate: formatDate(collectionDate),
         sortableDate:   toSortableDate(collectionDate),
         visitLabel:     formatVisitLabel(visitValue),
+        rawVisitLabel:  stringify(visitValue),
         significance:   significance || '',
         abnormality:    detectAbnormality(result, lowValue, highValue, ''),
       };
@@ -1375,9 +1414,9 @@ function renderPatientView() {
     elements.aeActionBar.innerHTML = "";
     elements.cmActionBar.innerHTML = "";
     elements.labAeActionBar.innerHTML = "";
+    elements.questionActionBar.innerHTML = "";
     elements.heroHintContent.innerHTML = '<p class="hero-hint-title">重点数据提示</p><p>上传 Excel 后会在这里显示需要优先核查的患者级风险信息。</p>';
     elements.baselineGrid.innerHTML = '<article class="baseline-card empty-card">暂无数据</article>';
-    elements.questionPanel.innerHTML = '<article class="question-empty">上传 Excel 后将自动提示缺失字段与异常结果。</article>';
     elements.historyList.innerHTML   = '<article class="history-card empty-card">暂无既往史数据</article>';
     elements.systemicList.innerHTML  = '<article class="history-card empty-card">暂无系统性抗肿瘤治疗史</article>';
     elements.responseList.innerHTML  = '<article class="history-card empty-card">待更新</article>';
@@ -1406,6 +1445,9 @@ function renderPatientView() {
     document.getElementById("cmOpenBtn").addEventListener("click", () => openCmWindow(patient));
   }
   const linkedLabAe = patient.labae_ae_linked || [];
+  const questionItems = buildQuestionItems(linkedLabAe);
+  const generalQuestionItems = buildGeneralQuestionItems(linkedLabAe);
+  const totalQuestionCount = questionItems.length + generalQuestionItems.length;
   const labAeRecords = (patient.labae_out || [])
     .filter((lab) => {
       const grade = Number.parseInt(String(lab?.LABAE_GRD || "").replace(/[^0-9]/g, ""), 10) || 0;
@@ -1420,12 +1462,18 @@ function renderPatientView() {
       });
       return linked || { "参与者代码": patient.patientId, build_ctc_out: lab, ae_normalized: {} };
     });
-  const labAeReady = Boolean(state.labAeData && Array.isArray(patient.labae_out));
+  const labAeReady = Boolean(state.labAeData && labAeRecords.length > 0);
   elements.labAeActionBar.innerHTML = labAeReady
     ? `<button class="ae-open-btn" id="labAeOpenBtn">&#128202; 查看Lab-AE（${labAeRecords.length} 条）</button>`
     : "";
   if (labAeReady) {
     document.getElementById("labAeOpenBtn").addEventListener("click", () => openLabAeWindow(patient, labAeRecords));
+  }
+  elements.questionActionBar.innerHTML = totalQuestionCount
+    ? `<button class="ae-open-btn" id="questionOpenBtn">&#128172; 查看质疑清单（${totalQuestionCount} 条）</button>`
+    : "";
+  if (totalQuestionCount) {
+    document.getElementById("questionOpenBtn").addEventListener("click", () => openQuestionWindow(patient, questionItems, generalQuestionItems));
   }
   elements.labCountBadge.textContent = `${patient.groupedLabs.length} 组`;
   elements.heroHintContent.innerHTML = renderCriticalHints(patient.criticalHints);
@@ -1436,17 +1484,6 @@ function renderPatientView() {
       <article class="baseline-card">
         <span class="baseline-label">${field.label}</span>
         <strong class="baseline-value">${escapeHtml(patient.baseline[field.key] || "未识别")}</strong>
-      </article>
-    `)
-    .join("");
-
-  // 数据提示
-  elements.questionPanel.innerHTML = patient.questions
-    .map((item) => `
-      <article class="question-item ${item.type}">
-        <span class="question-type">${item.type === "alert" ? "关注" : item.type === "warning" ? "补核" : "概览"}</span>
-        <strong>${escapeHtml(item.title)}</strong>
-        <span>${escapeHtml(item.detail)}</span>
       </article>
     `)
     .join("");
@@ -1732,11 +1769,13 @@ function openLabAeWindow(patient, linkedRecords) {
   const visits = (patient.dummy_sv || []).map((visit) => ({
     name: String(visit.visitName || ""),
     start: toNumber(visit.startSortableDate),
-    end: toNumber(visit.endSortableDate),
-  })).filter((visit) => visit.name && Number.isFinite(visit.start) && Number.isFinite(visit.end));
-  const positiveLabs = linkedRecords.map((record) => record.build_ctc_out || {});
-  const positiveTests = new Set(positiveLabs.map((lab) => String(lab.LBTEST_CN || "")).filter(Boolean));
-  const allLabs = (patient.labae_out || []).filter((lab) => positiveTests.has(String(lab.LBTEST_CN || lab["HRSTD LBTEST-CN"] || "")));
+    max_dtc: toNumber(visit.endSortableDate),
+  })).filter((visit) => visit.name && Number.isFinite(visit.start) && Number.isFinite(visit.max_dtc));
+  const sevenDays = 7 * 24 * 60 * 60 * 1000;
+  const allLabs = (patient.labae_out || []).filter((lab) => {
+    const grade = Number.parseInt(String(lab.LABAE_GRD || "").replace(/[^0-9]/g, ""), 10) || 0;
+    return grade >= 1;
+  });
   const rows = allLabs.map((lab) => {
     const record = linkedRecords.find((item) => {
       const linkedLab = item.build_ctc_out || {};
@@ -1744,13 +1783,12 @@ function openLabAeWindow(patient, linkedRecords) {
         String(linkedLab.collectionDate || "") === String(lab.collectionDate || "");
     }) || linkedRecords.find((item) => String(item.build_ctc_out?.LBTEST_CN || "") === String(lab.LBTEST_CN || ""));
     const ae = record?.ae_normalized || {};
-    const start = toNumber(lab.LABAE_ST_GRP && Date.parse(lab.LABAE_ST_GRP)) || toNumber(lab.sortableDate);
+    const start = toNumber(lab.LABAE_STDTC && Date.parse(lab.LABAE_STDTC)) || toNumber(lab.sortableDate);
     const visit = visits.find((item) => item.name === String(lab["访视名称_NEW_LB"] || lab.visitLabel || ""));
     const unresolved = String(lab.LABAE_OUT || "").includes("未恢复/未解决");
-    const visitEnd = visit?.end;
-    const endValue = unresolved && Number.isFinite(visitEnd)
-      ? visitEnd
-      : (toNumber(lab.LABAE_EN_GRP && Date.parse(lab.LABAE_EN_GRP)) || toNumber(lab.sortableDate));
+    const maxDtc = visit?.max_dtc;
+    const endValue = toNumber(lab.LABAE_ENDTC && Date.parse(lab.LABAE_ENDTC)) ||
+      (unresolved ? start + sevenDays : toNumber(lab.sortableDate));
     return {
       lab,
       ae,
@@ -1762,14 +1800,27 @@ function openLabAeWindow(patient, linkedRecords) {
       toxicity: String(lab.LBTOXCN || ""),
       isLabAe: Number.parseInt(String(lab.LABAE_GRD || "").replace(/[^0-9]/g, ""), 10) >= 1,
       isOngoing: unresolved,
-      inferredEnd: unresolved && Number.isFinite(visitEnd),
+      max_dtc: maxDtc,
+      inferredEnd: unresolved && Number.isFinite(maxDtc),
     };
   }).filter((row) => row.test && Number.isFinite(row.point) && Number.isFinite(row.start));
-  const maxSvEnd = (visitName) => {
-    const matched = visits.filter((visit) => visit.name === String(visitName || ""));
-    return matched.reduce((max, visit) => Math.max(max, visit.end), Number.NaN);
-  };
+  rows.sort((left, right) => left.point - right.point);
+
+  rows.forEach((row) => {
+    row.inferredEnd = row.isOngoing && !Number.isFinite(toNumber(row.lab.LABAE_ENDTC && Date.parse(row.lab.LABAE_ENDTC)));
+  });
   const timelineRows = [];
+  const labAeMatchGroups = new Map();
+  const getLinkedRecordsForLab = (lab) => {
+    const sameTest = linkedRecords.filter((item) =>
+      String(item.build_ctc_out?.LBTEST_CN || "") === String(lab.LBTEST_CN || "")
+    );
+    const sameDate = sameTest.filter((item) =>
+      String(item.build_ctc_out?.collectionDate || "") === String(lab.collectionDate || "")
+    );
+    return sameDate.length ? sameDate : sameTest;
+  };
+  let nextMatchGroupId = 1;
   (patient.ae_normalized || []).forEach((ae) => {
     const name = String(ae.PT_CN || ae.ptCn || ae.LLT_CN || ae.lltCn || ae.name || "").trim();
     const originalTerm = String(ae.name || "").trim();
@@ -1790,38 +1841,86 @@ function openLabAeWindow(patient, linkedRecords) {
       raw: ae,
     });
   });
-  linkedRecords.forEach((record) => {
-    const lab = record.build_ctc_out || {};
-    const ae = record.ae_normalized || {};
+  rows.forEach((row) => {
+    const lab = row.lab || {};
+    const linkedAes = getLinkedRecordsForLab(row.lab)
+      .map((record) => record.ae_normalized)
+      .filter(Boolean);
+    const ae = linkedAes[0] || row.ae || {};
     const grade = Number.parseInt(String(lab.LABAE_GRD || "").replace(/[^0-9]/g, ""), 10) || 0;
-    const name = String(ae.PT_CN || ae.ptCn || ae.LLT_CN || ae.lltCn || ae.name || lab.LBTOXCN || "").trim();
-    const start = toNumber(lab.sortableDate);
-    if (!name || !Number.isFinite(start) || grade < 1) return;
-    const ongoing = String(lab.LABAE_OUT || "").includes("未恢复/未解决");
-    const visitName = String(lab["访视名称_NEW_LB"] || lab.visitLabel || "");
-    const visitEnd = maxSvEnd(visitName);
-    const explicitEnd = toNumber(lab.LABAE_EN_GRP && Date.parse(lab.LABAE_EN_GRP));
-    const end = ongoing ? visitEnd : explicitEnd;
+    const name = String(ae.PT_CN || ae.ptCn || ae.LLT_CN || ae.lltCn || ae.name || row.toxicity || row.test || "").trim();
+    if (!name || !Number.isFinite(row.start) || grade < 1) return;
+    const matchGroupId = linkedAes.length ? `lab-ae-match-${nextMatchGroupId++}` : "";
+    if (matchGroupId) labAeMatchGroups.set(matchGroupId, linkedAes);
     timelineRows.push({
       source: "LAB AE",
       name,
       originalTerm: String(ae.name || lab.name || lab["检查项"] || "").trim(),
-      start,
-      end,
-      ongoing,
+      start: row.start,
+      end: row.end,
+      ongoing: row.isOngoing,
       grade: String(lab.LABAE_GRD || ""),
       outcome: String(lab.LABAE_OUT || ""),
       outcomeDate: String(lab.LABAE_EN_GRP || ""),
-      visit: visitName,
       raw: lab,
+      matchGroupId,
     });
   });
+  timelineRows.forEach((timelineRow) => {
+    if (timelineRow.source !== "EDC AE") return;
+    const matchGroupIds = [...labAeMatchGroups.entries()]
+      .filter(([, aeRows]) => aeRows.some((linkedAe) =>
+        String(linkedAe.seqNum || "") === String(timelineRow.raw.seqNum || "") &&
+        String(linkedAe.name || "") === String(timelineRow.raw.name || "") &&
+        Number(linkedAe.sortableDate) === Number(timelineRow.raw.sortableDate)
+      ))
+      .map(([groupId]) => groupId);
+    if (matchGroupIds.length) timelineRow.matchGroupIds = matchGroupIds;
+  });
+
+  const debugNormalizeAeName = (value) => String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "");
+  const debugLabAeNames = new Set(
+    timelineRows
+      .filter((row) => row.source === "LAB AE")
+      .map((row) => debugNormalizeAeName(row.name))
+      .filter(Boolean)
+  );
+  const debugUnlinkedEdcAeRows = timelineRows.filter((row) =>
+    row.source === "EDC AE" &&
+    !debugLabAeNames.has(debugNormalizeAeName(row.name))
+  );
+  console.groupCollapsed(`[Lab-AE Debug] ${patient.patientId} 未关联 EDC AE`);
+  console.log("LAB-AE 名称：", [...debugLabAeNames]);
+  console.log("未关联 EDC AE 原始数据：", debugUnlinkedEdcAeRows);
+  console.table(debugUnlinkedEdcAeRows.map((row) => ({
+    name: row.name || "",
+    originalTerm: row.originalTerm || "",
+    grade: row.grade || "",
+    start: Number.isFinite(row.start) ? new Date(row.start).toISOString().slice(0, 10) : "",
+    end: Number.isFinite(row.end) ? new Date(row.end).toISOString().slice(0, 10) : "",
+    outcome: row.outcome || "",
+    outcomeDate: row.outcomeDate || "",
+    aeSeqNum: row.raw?.seqNum || row.raw?.["AE序号"] || "",
+    aeStartDate: row.raw?.startDate || "",
+    aeEndDate: row.raw?.endDate || row.raw?.outcomeDate || "",
+    aeGrade: row.raw?.grade || "",
+    aeOngoing: row.raw?.ong || "",
+  })));
+  console.groupEnd();
 
   const payload = JSON.stringify({
     patientId: patient.patientId,
     rows,
     visits,
     timelineRows,
+    maxGradeByTest: Object.fromEntries(rows.reduce((grades, row) => {
+      const grade = Number.parseInt(String(row.lab.LABAE_GRD || "").replace(/[^0-9]/g, ""), 10) || 0;
+      grades.set(row.test, Math.max(grades.get(row.test) || 0, grade));
+      return grades;
+    }, new Map())),
   }).replace(/</g, "\\u003c");
   const labGradeLegend = [...new Set(rows
     .filter((row) => row.isLabAe)
@@ -1841,38 +1940,157 @@ function openLabAeWindow(patient, linkedRecords) {
     .join("");
   const css = `*{box-sizing:border-box}body{margin:0;padding:18px;background:#f8fafc;color:#1e293b;font:13px system-ui,-apple-system,"Microsoft YaHei",sans-serif}h1{margin:0 0 8px;color:#1e3a5f;font-size:1.25rem}.meta{color:#64748b;margin-bottom:14px}.card{padding:14px;background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 1px 4px rgba(15,23,42,.08)}.chart-scroll{max-width:100%;max-height:70vh;overflow:auto;border:1px solid #f1f5f9}#chart{overflow:visible}.chart{position:relative;min-width:1100px;width:1100px;height:450px}.axis{position:absolute;left:190px;right:18px;top:22px;height:1px;background:#94a3b8}.row-label{position:absolute;left:0;width:180px;font-weight:700;color:#334155;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.row-line{position:absolute;left:190px;right:18px;height:1px;background:#e2e8f0}.bar{position:absolute;height:16px;padding:0 5px;border-radius:8px;background:#fbbf24;border:1px solid #d97706;cursor:pointer;color:#78350f;font-size:10px;font-weight:700;line-height:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.bar.ongoing{border-style:dashed;background:#fef3c7}.bar:hover{background:#f59e0b}.point{position:absolute;width:8px;height:8px;margin:-4px;border-radius:50%;background:#237a63;border:1px solid #166534;cursor:pointer}.tick{position:absolute;top:396px;color:#64748b;font-size:10px;transform:translateX(-50%);white-space:nowrap}.visit-tick{position:absolute;top:414px;color:#1e3a5f;font-size:11px;font-weight:700;transform:translateX(-50%);white-space:nowrap;max-width:140px;overflow:hidden;text-overflow:ellipsis;text-align:center}.legend{margin-top:10px;color:#475569;font-size:12px}.timeline-title{margin:0 0 8px;color:#1e3a5f;font-size:1.25rem;font-weight:700}.timeline-card{overflow:hidden}.timeline-scroll{max-width:100%;max-height:70vh;overflow:auto;border:1px solid #f1f5f9}.timeline-legend{margin-top:6px;color:#475569;font-size:12px}.legend-edc{color:#1976d2}.legend-lab{color:#d66a43}.tip{position:fixed;display:none;z-index:3;max-width:360px;padding:10px 12px;background:#0f172a;color:#f8fafc;border-radius:6px;line-height:1.55;box-shadow:0 5px 18px rgba(15,23,42,.25);pointer-events:none}.tip b{color:#fbbf24}`;
   const script = `(function(){
-const data=JSON.parse(document.getElementById('labAeData').textContent), chart=document.getElementById('chart'), tip=document.getElementById('tip');chart.parentElement.style.overflowX='scroll';
+const data=JSON.parse(document.getElementById('labAeData').textContent), chart=document.getElementById('chart'), tip=document.getElementById('tip');chart.parentElement.style.overflowX='scroll';chart.parentElement.style.overflowY='auto';
 const rows=data.rows, visits=data.visits||[], dates=rows.flatMap(r=>[r.start,r.end,r.point]).filter(Number.isFinite);
-const min=Math.min.apply(null,dates), max=Math.max.apply(null,dates.concat(visits.flatMap(v=>[v.start,v.end]))), span=Math.max(max-min,86400000), left=190, right=18, width=Math.max(1600,Math.min(2600,1600+span/86400000*2))-left-right;
-const tests=[...new Set(rows.map(r=>r.test))], esc=s=>String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'),labGradeColors={1:{fill:'#facc15',stroke:'#a16207'},2:{fill:'#fbbf24',stroke:'#b45309'},3:{fill:'#fb923c',stroke:'#c2410c'},4:{fill:'#f87171',stroke:'#b91c1c'},5:{fill:'#ef4444',stroke:'#991b1b'}};
-function x(v){return left+(v-min)/span*width}chart.style.width=(width+left+right)+'px';
-const drugFields=[['盲态药物A','对HRS-8080采取措施','与HRS-8080的关系'],['盲态药物B','对来曲唑采取措施','与来曲唑的关系'],['盲态药物C','对阿那曲唑采取措施','与阿那曲唑的关系'],['盲态药物D','对依西美坦采取措施','与依西美坦的关系'],['盲态药物E','对他莫昔芬采取措施','与他莫昔芬的关系']];
+const min=Math.min.apply(null,dates), max=Math.max.apply(null,dates.concat(visits.flatMap(v=>[v.start,v.max_dtc]))), span=Math.max(max-min,86400000), left=190, right=18, width=Math.max(1600,Math.min(2600,1600+span/86400000*2))-left-right;
+const maxGradeByTest=data.maxGradeByTest||{}, tests=[...new Set(rows.map(r=>r.test))].slice(0,11), rowGap=60, visitTickTop=42+tests.length*rowGap+8, visitLaneHeight=24, visitLaneCount=3, esc=s=>String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'),labGradeColors={1:{fill:'#facc15',stroke:'#a16207'},2:{fill:'#fbbf24',stroke:'#b45309'},3:{fill:'#fb923c',stroke:'#c2410c'},4:{fill:'#f87171',stroke:'#b91c1c'},5:{fill:'#ef4444',stroke:'#991b1b'}};
+function x(v){return left+(v-min)/span*width}chart.style.width=(width+left+right)+'px';chart.style.height=(visitTickTop+visitLaneHeight*visitLaneCount+8)+'px';
+const drugFields=[['盲态药物A','对盲态药物A采取措施','与盲态药物A的关系'],['盲态药物B','对盲态药物B采取措施','与盲态药物B的关系'],['盲态药物C','对盲态药物C采取措施','与盲态药物C的关系'],['盲态药物D','对盲态药物D采取措施','与盲态药物D的关系'],['盲态药物E','对盲态药物E采取措施','与盲态药物E的关系']];
 function drugInfo(a){return drugFields.map(([label,action,relation])=>{const actionValue=String(a[action]??'').trim(),relationValue=String(a[relation]??'').trim();return (actionValue?'<br>'+label+'采取措施：'+esc(actionValue): '')+(relationValue?'<br>'+label+'关系：'+esc(relationValue):'');}).join('');}
-function show(event,row){const l=row.lab,a=row.ae,line=(label,value)=>{const text=String(value??'').trim();return text?'<br>'+label+'：'+esc(text):'';};tip.innerHTML='<b>'+esc(row.toxicity||row.test)+'</b>'+line('参与者代码',l['参与者代码']||data.patientId)+line('检查项',l.LBTEST_CN||row.test)+line('LB数值',l.result)+line('单位',l.unit)+line('标准单位',l.standardUnit)+line('标准下限',l.standardLow)+line('标准上限',l.standardHigh)+line('临床意义',l.significance)+line('访视',row.visit)+line('AE名称',a.name)+line('AE开始时间',a.startDate)+line('AE结束时间',a.outcomeDate)+line('AE转归',a.outcome)+line('AE等级',a.grade)+line('是否为SAE',a.isSae)+line('LABAE_OUT',l.LABAE_OUT)+drugInfo(a);tip.style.display='block';tip.style.left=Math.min(event.clientX+12,window.innerWidth-380)+'px';tip.style.top=Math.min(event.clientY+12,window.innerHeight-300)+'px';}
+function show(event,row){const l=row.lab,a=row.ae,line=(label,value)=>{const text=String(value??'').trim();return text?'<br>'+label+'：'+esc(text):'';},recordDetails=(row.records||[row]).map((record)=>{const lab=record.lab;return '<div style="margin-top:6px;padding-top:5px;border-top:1px solid #e2e8f0">'+line('访视',record.visit)+line('检查日期',lab.collectionDate)+line('LB实验室结果',lab.result)+line('单位',lab.unit)+line('正常值范围-下限',lab.referenceLow)+line('正常值范围-上限',lab.referenceHigh)+line('标准单位',lab.standardUnit)+line('标准单位检测值',lab.standardResult)+line('标准单位下限',lab.standardLow)+line('标准单位上限',lab.standardHigh)+line('LABAE_GRD',lab.LABAE_GRD)+line('LABAE_OUT',lab.LABAE_OUT)+line('LABAE_STDTC',lab.LABAE_STDTC)+line('LABAE_ENDTC',lab.LABAE_ENDTC)+line('LABAE_ST_GRP',lab.LABAE_ST_GRP)+line('LABAE_EN_GRP',lab.LABAE_EN_GRP)+'</div>';}).join('');tip.innerHTML='<b>'+esc(row.toxicity||row.test)+'</b>'+line('参与者代码',l['参与者代码']||data.patientId)+line('检查项',l.LBTEST_CN||row.test)+line('事件开始',new Date(row.start).toISOString().slice(0,10))+line('事件结束',new Date(row.end).toISOString().slice(0,10))+line('AE名称',a.name)+line('AE开始时间',a.startDate)+line('AE结束时间',a.outcomeDate)+line('AE转归',a.outcome)+line('AE等级',a.grade||l.LABAE_GRD)+line('是否为SAE',a.isSae)+drugInfo(a)+recordDetails;tip.style.display='block';tip.style.left=Math.min(event.clientX+12,window.innerWidth-380)+'px';tip.style.top=Math.min(event.clientY+12,window.innerHeight-300)+'px';}
 function hide(){tip.style.display='none';}
-tests.forEach((test,i)=>{const y=42+i*34,label=document.createElement('div');label.className='row-label';label.style.top=(y-8)+'px';label.textContent=test;chart.appendChild(label);const line=document.createElement('div');line.className='row-line';line.style.top=y+'px';chart.appendChild(line);rows.filter(r=>r.test===test).forEach(r=>{if(r.isLabAe){const bar=document.createElement('div'),grade=Number.parseInt(String(r.lab.LABAE_GRD||'').replace(/[^0-9]/g,''),10)||0,gradeStyle=labGradeColors[grade]||labGradeColors[1];const gradeLabel=document.createElement('div');gradeLabel.style.position='absolute';gradeLabel.style.left=x(r.start)+'px';gradeLabel.style.top=(y-24)+'px';gradeLabel.style.color=gradeStyle.stroke;gradeLabel.style.fontWeight='700';gradeLabel.style.fontSize='10px';gradeLabel.textContent='Grade '+grade;chart.appendChild(gradeLabel);bar.className='bar'+(r.isOngoing?' ongoing':'');bar.style.left=x(r.start)+'px';bar.style.top=(y-8)+'px';bar.style.width=Math.max(8,x(r.end)-x(r.start))+'px';bar.style.background=gradeStyle.fill;bar.style.borderColor=gradeStyle.stroke;bar.textContent=r.inferredEnd?'LABAE_推断=Ongoing':'';bar.title='Grade '+grade+(r.inferredEnd?' · LABAE_推断=Ongoing':'');bar.addEventListener('mousemove',e=>show(e,r));bar.addEventListener('mouseleave',hide);chart.appendChild(bar);}const point=document.createElement('div');point.className='point';point.style.left=x(r.point)+'px';point.style.top=y+'px';point.addEventListener('mousemove',e=>show(e,r));point.addEventListener('mouseleave',hide);chart.appendChild(point);});});
+tests.forEach((test,i)=>{const y=42+i*rowGap,label=document.createElement('div');label.className='row-label';label.style.top=(y-8)+'px';label.textContent=test+(maxGradeByTest[test]?'  G'+maxGradeByTest[test]:'');chart.appendChild(label);const line=document.createElement('div');line.className='row-line';line.style.top=y+'px';chart.appendChild(line);rows.filter(r=>r.test===test).forEach((r,recordIndex)=>{const laneOffset=(recordIndex%3)*18;if(r.isLabAe){const bar=document.createElement('div'),grade=Number.parseInt(String(r.lab.LABAE_GRD||'').replace(/[^0-9]/g,''),10)||0,gradeStyle=labGradeColors[grade]||labGradeColors[1],barTop=y-8+laneOffset;bar.className='bar'+(r.isOngoing?' ongoing':'');bar.style.left=x(r.start)+'px';bar.style.top=barTop+'px';bar.style.width=Math.max(8,x(r.end)-x(r.start))+'px';bar.style.background=gradeStyle.fill;bar.style.borderColor=gradeStyle.stroke;bar.style.color=gradeStyle.stroke;bar.style.textAlign='center';bar.style.lineHeight='14px';bar.textContent='Grade '+grade;bar.addEventListener('mousemove',e=>show(e,r));bar.addEventListener('mouseleave',hide);chart.appendChild(bar);}const point=document.createElement('div');point.className='point';point.style.left=x(r.point)+'px';point.style.top=(y+laneOffset)+'px';point.addEventListener('mousemove',e=>show(e,r));point.addEventListener('mouseleave',hide);chart.appendChild(point);});});
 const visitPositions=new Map();rows.forEach(row=>{if(!visitPositions.has(row.visit))visitPositions.set(row.visit,[]);visitPositions.get(row.visit).push(row.point);});
-[...visitPositions.entries()].forEach(([name,points])=>{const visitTick=document.createElement('div');visitTick.className='visit-tick';visitTick.style.left=x(points.reduce((sum,value)=>sum+value,0)/points.length)+'px';visitTick.textContent=name;visitTick.title=name;chart.appendChild(visitTick);});
+const visitLabelHalfWidth=150, visitLanes=Array(visitLaneCount).fill(-Infinity), visitPriority=name=>name==='筛选期'?0:name.startsWith('筛选期_计划外访视')?1:2, visitLabels=[...visitPositions.entries()].map(([name,points])=>({name,position:x(points.reduce((sum,value)=>sum+value,0)/points.length)})).sort((a,b)=>a.position-b.position||visitPriority(a.name)-visitPriority(b.name)||a.name.localeCompare(b.name));
+visitLabels.forEach(({name,position})=>{const visitLane=visitLanes.findIndex(lastRight=>position-visitLabelHalfWidth>=lastRight);const lane=visitLane===-1?visitLaneCount-1:visitLane;visitLanes[lane]=position+visitLabelHalfWidth;const visitTick=document.createElement('div');visitTick.className='visit-tick';visitTick.style.left=position+'px';visitTick.style.top=(visitTickTop+lane*visitLaneHeight)+'px';visitTick.style.width=(visitLabelHalfWidth*2)+'px';visitTick.style.maxWidth=(visitLabelHalfWidth*2)+'px';visitTick.style.whiteSpace='nowrap';visitTick.style.overflow='visible';visitTick.style.lineHeight='16px';visitTick.style.wordBreak='normal';visitTick.textContent=name;visitTick.title=name;chart.appendChild(visitTick);});
 })();`;
+  const scrollbarCss = `.chart-scroll,.timeline-scroll{scrollbar-color:#94a3b8 #e2e8f0;scrollbar-width:auto}.chart-scroll::-webkit-scrollbar,.timeline-scroll::-webkit-scrollbar{height:14px;width:14px}.chart-scroll::-webkit-scrollbar-track,.timeline-scroll::-webkit-scrollbar-track{background:#e2e8f0;border-radius:0}.chart-scroll::-webkit-scrollbar-thumb,.timeline-scroll::-webkit-scrollbar-thumb{background:#94a3b8;border:2px solid #e2e8f0;border-radius:4px}.chart-scroll::-webkit-scrollbar-thumb:hover,.timeline-scroll::-webkit-scrollbar-thumb:hover{background:#64748b}.chart-scroll::-webkit-scrollbar-button,.timeline-scroll::-webkit-scrollbar-button{display:block;width:14px;height:14px;background:#cbd5e1}`;
   const timelineScript = `(function(){
-const data=JSON.parse(document.getElementById('labAeData').textContent), chart=document.getElementById('timelineChart');chart.parentElement.style.overflowX='scroll';
+const data=JSON.parse(document.getElementById('labAeData').textContent), chart=document.getElementById('timelineChart');chart.parentElement.style.overflowX='scroll';chart.parentElement.style.overflowY='hidden';
 if(!chart)return;
 const sourceRows=data.timelineRows||[], esc=s=>String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 if(!sourceRows.length){chart.innerHTML='<div style="color:#94a3b8;padding:12px">暂无可展示的 EDC AE 或 LAB AE 时间数据</div>';return;}
 const DAY=86400000, shortEnd=(r)=>r.ongoing&&r.source==='EDC AE'?r.start+14*DAY:(Number.isFinite(r.end)?r.end:r.start);
 const groups=new Map();sourceRows.forEach((r,index)=>{const key=r.source+'|'+r.name;if(!groups.has(key))groups.set(key,{source:r.source,name:r.name,segments:[]});groups.get(key).segments.push({...r,sourceIndex:index,end:shortEnd(r)});});
-const groupRows=[...groups.values()].sort((a,b)=>a.segments[0].start-b.segments[0].start||a.source.localeCompare(b.source));
+const nameBlocks=new Map();groups.forEach((group)=>{if(!nameBlocks.has(group.name))nameBlocks.set(group.name,[]);nameBlocks.get(group.name).push(group);});
+const blockStart=(block)=>Math.min(...block.flatMap(group=>group.segments.map(segment=>segment.start)));
+const groupRows=[...nameBlocks.values()].sort((left,right)=>blockStart(left)-blockStart(right)).flatMap((block)=>block.sort((a,b)=>a.segments[0].start-b.segments[0].start||a.source.localeCompare(b.source)));
+const matchedGroupRows=new Map();groupRows.forEach((group,index)=>{group.segments.forEach(segment=>{(segment.matchGroupIds||[segment.matchGroupId]).filter(Boolean).forEach(groupId=>{if(!matchedGroupRows.has(groupId))matchedGroupRows.set(groupId,new Set());matchedGroupRows.get(groupId).add(index);});});});
 const dates=sourceRows.flatMap(r=>[r.start,shortEnd(r)]).filter(Number.isFinite), min=Math.min(...dates), max=Math.max(...dates), span=Math.max(max-min,DAY), LP=215,RP=70,TP=30,RH=32,RG=5,W=Math.max(1600,Math.min(2800,1600+span/DAY*2)),BW=W-LP-RP,H=TP+groupRows.length*(RH+RG)+36;
 const x=v=>LP+(v-min)/span*BW, fmt=v=>new Date(v).toISOString().slice(0,10), color={"EDC AE":{fill:'#90caf9',stroke:'#1976d2'},"LAB AE":{fill:'#ffb38f',stroke:'#d66a43'}};
 const ticks=[];const count=Math.max(2,Math.min(8,Math.floor(BW/130)));for(let i=0;i<=count;i++)ticks.push(min+(max-min)*i/count);
 let svg='<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 '+W+' '+H+'" style="display:block;width:100%;min-width:900px">';svg+='<rect width="100%" height="100%" fill="#fffdf8"/>';
+matchedGroupRows.forEach((rowIndexes)=>{const first=Math.min(...rowIndexes),last=Math.max(...rowIndexes),top=TP+first*(RH+RG)-5,bottom=TP+last*(RH+RG)+RH+5;svg+='<rect x="8" y="'+top+'" width="'+(W-16)+'" height="'+(bottom-top)+'" rx="4" fill="#eef1f4" stroke="#cbd5e1" stroke-width="1" opacity="0.78"/>';});
 ticks.forEach(t=>{const xx=x(t).toFixed(1);svg+='<line x1="'+xx+'" y1="24" x2="'+xx+'" y2="'+(H-28)+'" stroke="#e5e7eb"/><text x="'+xx+'" y="19" text-anchor="middle" font-size="10" fill="#2563a5">'+fmt(t)+'</text>';});
 groupRows.forEach((g,i)=>{const y=TP+i*(RH+RG), c=color[g.source]||color['EDC AE'];svg+='<line x1="'+LP+'" y1="'+(y+RH+2)+'" x2="'+(W-RP)+'" y2="'+(y+RH+2)+'" stroke="#e5e7eb"/>';svg+='<text x="14" y="'+(y+13)+'" font-size="10" font-weight="700" fill="#0f172a">'+esc(g.source)+'</text><text x="14" y="'+(y+26)+'" font-size="10" fill="#0f172a">'+esc(g.name)+'</text>';
 g.segments.forEach(r=>{const sx=x(r.start),ex=Math.max(sx+6,x(r.end)),ongoing=r.ongoing,gradeNumber=String(r.grade||'').match(/[1-5]/)?.[0]||'';svg+='<g class="timeline-segment" data-timeline-index="'+r.sourceIndex+'">'+(gradeNumber?'<text x="'+sx.toFixed(1)+'" y="'+(y+6)+'" text-anchor="start" font-size="10" font-weight="700" fill="'+c.stroke+'">Grade '+gradeNumber+'</text>':'')+'<rect x="'+sx.toFixed(1)+'" y="'+(y+9)+'" width="'+(ex-sx).toFixed(1)+'" height="16" rx="3" fill="'+c.fill+'" stroke="'+c.stroke+'"'+(ongoing?' stroke-dasharray="5,3"':'')+'/></g>';});});
 svg+='</svg>';chart.innerHTML=svg+'<div class="timeline-legend"><span class="legend-edc">■</span> EDC AE　<span class="legend-lab">■</span> LAB AE　虚线：未结束 EDC AE 短延伸</div>';chart.querySelector('svg').style.width=W+'px';
 const tip=document.getElementById('tip');const line=(label,value)=>value?'<br>'+label+'：'+esc(value):'';
-chart.querySelectorAll('.timeline-segment').forEach(segment=>{segment.addEventListener('mousemove',event=>{const r=sourceRows[Number(segment.dataset.timelineIndex)],end=shortEnd(r);tip.innerHTML='<b>'+esc(r.source+' · '+r.name)+'</b>'+line('开始日期',fmt(r.start))+line('结束日期',r.ongoing?(r.source==='LAB AE'?fmt(end):'未结束（短虚线延伸）'):fmt(end))+line('等级',r.grade)+line('转归',r.outcome)+line('原始术语',r.originalTerm)+line('访视',r.visit)+line('LABAE_OUT',r.source==='LAB AE'?r.outcome:'');tip.style.display='block';tip.style.left=Math.min(event.clientX+14,window.innerWidth-380)+'px';tip.style.top=Math.min(event.clientY+14,window.innerHeight-260)+'px';});segment.addEventListener('mouseleave',()=>{tip.style.display='none';});});})();`;
-  const html = `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><title>Lab-AE — ${esc(patient.patientId)}</title><style>${css}</style></head><body><h1>Lab-AE（实验室推导结果展示）— ${esc(patient.patientId)}</h1><div class="meta">共 ${rows.length} 条关联记录；仅显示 LBTEST_CN 非空且 LABAE_GRD ≥ Grade 1 的记录</div><div class="card"><div class="chart-scroll"><div id="chart" class="chart"></div></div><div class="legend">● 实验室检查结果　<span style="color:#d97706">━</span> Lab-AE横条（显示对应 LABAE_GRD；LABAE_ST_GRP 至 LABAE_EN_GRP；未恢复/未解决时虚线延长至该访视 max_dtc，并标记 LABAE_推断=Ongoing）</div><div class="lab-grade-legend"><span>Lab-AE等级：</span>${labGradeLegend}</div></div><div class="card timeline-card"><h1 class="timeline-title">AE标准化浏览（EDC AE V.S. Lab-AE）</h1><div class="timeline-scroll"><div id="timelineChart"></div></div></div><div id="tip" class="tip"></div><script type="application/json" id="labAeData">${payload}</script><script>${script}<\/script><script>${timelineScript}<\/script></body></html>`;
+chart.querySelectorAll('.timeline-segment').forEach(segment=>{segment.addEventListener('mousemove',event=>{const r=sourceRows[Number(segment.dataset.timelineIndex)],end=shortEnd(r),displayEnd=r.ongoing?'':fmt(end);tip.innerHTML='<b>'+esc(r.source+' · '+r.name)+'</b>'+line('开始日期',fmt(r.start))+line('结束日期',displayEnd)+line('等级',r.grade)+line('转归',r.outcome)+line('原始术语',r.originalTerm)+line('LABAE_OUT',r.source==='LAB AE'?r.outcome:'');tip.style.display='block';tip.style.left=Math.min(event.clientX+14,window.innerWidth-380)+'px';tip.style.top=Math.min(event.clientY+14,window.innerHeight-260)+'px';});segment.addEventListener('mouseleave',()=>{tip.style.display='none';});});})();`;
+  const html = `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><title>Lab-AE — ${esc(patient.patientId)}</title><style>${css}${scrollbarCss}</style></head><body><h1>Lab-AE（实验室推导结果展示）— ${esc(patient.patientId)}</h1><div class="meta">共 ${rows.length} 条关联记录；仅显示 LBTEST_CN 非空且 LABAE_GRD ≥ Grade 1 的记录</div><div class="card"><div class="chart-scroll"><div id="chart" class="chart"></div></div><div class="legend">● 实验室检查结果　<span style="color:#d97706">━</span> Lab-AE横条（显示对应 LABAE_GRD；未恢复/未解决时从起始日期向后延长 7 天，并在下一条同检查项记录处截断）</div><div class="lab-grade-legend"><span>Lab-AE等级：</span>${labGradeLegend}</div></div><div class="card timeline-card"><h1 class="timeline-title">AE标准化浏览（EDC AE V.S. Lab-AE）</h1><div class="timeline-scroll"><div id="timelineChart"></div></div></div><div id="tip" class="tip"></div><script type="application/json" id="labAeData">${payload}</script><script>${script}<\/script><script>${timelineScript}<\/script></body></html>`;
+  const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  window.open(url, "_blank");
+  window.setTimeout(() => URL.revokeObjectURL(url), 120000);
+}
+
+function buildQuestionItems(linkedRecords) {
+  const toGrade = (value) => {
+    const match = String(value ?? "").match(/(?:grade|g)?\s*([0-9]+)/i);
+    return match ? Number(match[1]) : Number.NaN;
+  };
+  const display = (value) => String(value ?? "").trim() || "未填写";
+  return linkedRecords.reduce((items, record) => {
+    const lab = record?.build_ctc_out || {};
+    const ae = record?.ae_normalized || {};
+    const labGrade = toGrade(lab.LABAE_GRD);
+    const aeGrade = toGrade(ae.grade);
+    const types = [];
+    const statements = [];
+    const labDate = display(lab.collectionDate);
+    const labResult = display(lab.result);
+    const toxicity = display(lab.LBTOXCN);
+    const hasLabAe = Object.keys(lab).length > 0;
+    const hasEdcAe = Object.keys(ae).length > 0;
+
+    if (hasLabAe && !hasEdcAe) {
+      types.push("疑似漏记AE");
+      statements.push(`${labDate} ${display(lab.LBTEST_CN)}实验室检查结果为${labResult}，按照CTCAE V5.0标准提示 ${display(lab.LABAE_GRD)} ${toxicity}。请核实EDC是否记录${display(lab["访视名称_NEW_LB"])}期间 ${display(lab.LBTEST_CN)}的相关AE。`);
+      items.push({ types, statement: statements.join(" ") });
+      return items;
+    }
+
+    if (!hasLabAe) return items;
+
+    if (labGrade !== aeGrade) {
+      types.push("AE等级疑似不一致");
+      statements.push(`${labDate} ${display(lab.LBTEST_CN || lab["HRSTD LBTEST-CN"])}检查结果为${labResult}，按照CTCAE V5.0标准提示 ${display(lab.LABAE_GRD)} ${toxicity}，而EDC等级为${display(ae.grade)}。请核实AE分级。`);
+    }
+    const labOutcome = String(lab.LABAE_OUT ?? "").trim();
+    const aeOutcome = String(ae.outcome ?? "").trim();
+    const outcomesMatch = labOutcome === aeOutcome ||
+      (labOutcome === "已恢复" && aeOutcome === "恢复/解决");
+    if (!outcomesMatch) {
+      types.push("AE转归状态疑似不一致");
+      statements.push(`AE#${display(ae.seqNum)} ${lab.LBTOXCN}后续检查结果AE转归是LABAE_OUT=${display(labOutcome)}，但是AE转归为${display(aeOutcome)}。请核实EDC转归。`);
+    }
+    if (types.length) items.push({ types, statement: statements.join(" ") });
+    return items;
+  }, []);
+}
+
+function buildGeneralQuestionItems(linkedRecords) {
+  const display = (value) => String(value ?? "").trim() || "未填写";
+  const byAe = new Map();
+
+  linkedRecords.forEach((record) => {
+    const ae = record?.ae_normalized || {};
+    const lab = record?.build_ctc_out || {};
+    if (!Object.keys(ae).length) return;
+    const key = String(ae.seqNum ?? ae.name ?? "").trim();
+    if (!key) return;
+    const group = byAe.get(key) || { ae, labs: [] };
+    group.labs.push(lab);
+    byAe.set(key, group);
+  });
+
+  const dateStatements = [];
+  const recoveryStatements = [];
+  byAe.forEach(({ ae, labs }) => {
+    const hasLabAe = labs.some((lab) => Object.keys(lab).length > 0);
+    if (!hasLabAe) {
+      const prefix = `AE#${display(ae.seqNum)}记录的${display(ae.visitName_NEW)}访视下的`;
+      const aeName = display(ae.name);
+      const startText = `${prefix}开始日期为${display(ae.startDate)}，未见对应的${aeName}相关检查结果`;
+      const outcomeText = `${prefix}转归日期为${display(ae.outcomeDate)}，未见对应的${aeName}相关检查结果`;
+      dateStatements.push(`${startText}；${outcomeText}。`);
+    }
+
+    labs.filter((lab) => String(lab.LABAE_OUT ?? "").trim() === "已恢复")
+      .filter(() => String(ae.outcome ?? "").trim() !== "恢复/解决")
+      .forEach((lab) => {
+        const testName = display(lab.name || lab.LBTEST_CN || lab["HRSTD LBTEST-CN"]);
+        recoveryStatements.push(`AE#${display(ae.seqNum)}对应的${display(ae.startDate)}的${testName}检查结果已恢复至非AE范围，请核实并更新AE转归日期及转归情况。`);
+      });
+  });
+
+  const items = [];
+  if (dateStatements.length) {
+    items.push({
+      type: "warning",
+      typeLabel: "一般质疑",
+      title: "AE起始/转归日期无对应检查",
+      detail: dateStatements.join("\n"),
+    });
+  }
+  if (recoveryStatements.length) {
+    items.push({
+      type: "warning",
+      typeLabel: "一般质疑",
+      title: "检查已恢复，但AE未填写转归",
+      detail: recoveryStatements.join("\n"),
+    });
+  }
+  return items;
+}
+
+function openQuestionWindow(patient, questionItems, generalQuestionItems) {
+  const esc = (value) => String(value || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const criticalCards = questionItems.map((item, index) => `<article class="question-card"><h2>${index + 1}. ${item.types.map(esc).join(" / ")}</h2><p title="点击复制此段质疑内容">${esc(item.statement)}</p></article>`).join("");
+  const generalCards = generalQuestionItems.map((item, index) => `<article class="question-card"><h2>${index + 1}. ${esc(item.title)}</h2><p title="点击复制此段质疑内容">${esc(item.detail).replace(/\n/g, "<br>")}</p></article>`).join("");
+  const criticalContent = criticalCards || '<div class="empty">暂无重点质疑</div>';
+  const generalContent = generalCards || '<div class="empty">暂无一般质疑</div>';
+  const html = `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>质疑清单 — ${esc(patient.patientId)}</title><style>body{margin:0;padding:24px;background:#f7f8f3;color:#17324d;font:16px system-ui,-apple-system,"Microsoft YaHei",sans-serif}main{max-width:1500px;margin:0 auto;background:#fffdf8;border:1px solid #dbe4dd;border-radius:10px;padding:28px;box-shadow:0 1px 3px rgba(15,23,42,.08)}h1{margin:0 0 8px;font-size:1.55rem;color:#17324d}.meta{margin-bottom:24px;color:#64748b}.columns{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:24px}.column{min-width:0}.column-title{margin:0 0 10px;font-size:1.2rem}.column:first-child .column-title{color:#d94d4d}.column:last-child .column-title{color:#2563eb}.question-card{margin-top:14px;padding:18px 16px;border:1px solid #dbe4dd;border-radius:9px;background:#fff}h2{margin:0 0 14px;font-size:1.05rem;color:#17324d}.question-card p{margin:0;padding:13px 14px;background:#f1f5f2;color:#355d7d;line-height:1.7;cursor:pointer;user-select:text}.column:first-child .question-card p{border-left:4px solid #d94d4d}.column:last-child .question-card p{border-left:4px solid #2563eb}.question-card p:active{opacity:.72}.empty{padding:32px;text-align:center;background:#f1f5f2;border:1px solid #dbe4dd;border-radius:8px;color:#8798a5}#copyNotice{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);padding:9px 16px;border-radius:6px;background:#17324d;color:#fff;font-size:14px;opacity:0;pointer-events:none;transition:opacity .18s ease}#copyNotice.visible{opacity:1}@media(max-width:900px){body{padding:12px}main{padding:18px}.columns{grid-template-columns:1fr;gap:28px}}</style></head><body><main><h1>质疑清单 — ${esc(patient.patientId)}</h1><div class="meta">重点质疑 ${questionItems.length} 条；一般质疑 ${generalQuestionItems.length} 类</div><div class="columns"><section class="column"><h2 class="column-title">重点质疑 / 逐条呈现</h2>${criticalContent}</section><section class="column"><h2 class="column-title">一般质疑 / 按问题类型汇总</h2>${generalContent}</section></div></main><div id="copyNotice" role="status" aria-live="polite"></div><script>const notice=document.getElementById("copyNotice");let noticeTimer=0;function showCopyNotice(message){notice.textContent=message;notice.classList.add("visible");window.clearTimeout(noticeTimer);noticeTimer=window.setTimeout(()=>notice.classList.remove("visible"),1600)}function fallbackCopy(text){const area=document.createElement("textarea");area.value=text;area.style.position="fixed";area.style.opacity="0";document.body.appendChild(area);area.focus();area.select();let copied=false;try{copied=document.execCommand("copy")}catch(error){copied=false}area.remove();return copied}async function copyQuestion(event){if(event.button!==0)return;const text=event.currentTarget.textContent.trim();if(!text)return;try{if(navigator.clipboard?.writeText){await navigator.clipboard.writeText(text)}else if(!fallbackCopy(text)){throw new Error("copy failed")}showCopyNotice("已复制此段质疑内容")}catch(error){if(fallbackCopy(text))showCopyNotice("已复制此段质疑内容");else showCopyNotice("复制失败，请手动选择文本")}}document.querySelectorAll(".question-card p").forEach((paragraph)=>paragraph.addEventListener("click",copyQuestion));<\/script></body></html>`;
   const blob = new Blob([html], { type: "text/html;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   window.open(url, "_blank");
@@ -1924,11 +2142,11 @@ function openAeWindow(patient) {
   if (aePopupWindow && !aePopupWindow.closed) aePopupWindow.close();
   const list = patient.aeList.slice().sort((a, b) => a.sortableDate - b.sortableDate);
   const drugDisplay = [
-    { name: 'HRS-8080', label: '盲态药物A', action: '对HRS-8080采取措施', rel: '与HRS-8080的关系' },
-    { name: '来曲唑', label: '盲态药物B', action: '对来曲唑采取措施', rel: '与来曲唑的关系' },
-    { name: '阿那曲唑', label: '盲态药物C', action: '对阿那曲唑采取措施', rel: '与阿那曲唑的关系' },
-    { name: '依西美坦', label: '盲态药物D', action: '对依西美坦采取措施', rel: '与依西美坦的关系' },
-    { name: '他莫昔芬', label: '盲态药物E', action: '对他莫昔芬采取措施', rel: '与他莫昔芬的关系' },
+    { name: '盲态药物A', label: '盲态药物A', action: '对盲态药物A采取措施', rel: '与盲态药物A的关系' },
+    { name: '盲态药物B', label: '盲态药物B', action: '对盲态药物B采取措施', rel: '与盲态药物B的关系' },
+    { name: '盲态药物C', label: '盲态药物C', action: '对盲态药物C采取措施', rel: '与盲态药物C的关系' },
+    { name: '盲态药物D', label: '盲态药物D', action: '对盲态药物D采取措施', rel: '与盲态药物D的关系' },
+    { name: '盲态药物E', label: '盲态药物E', action: '对盲态药物E采取措施', rel: '与盲态药物E的关系' },
   ];
   const toN = (g) => parseInt(g, 10) || 0;
   const highGrade = list.filter((ae) => toN(ae.grade) >= 3).length;

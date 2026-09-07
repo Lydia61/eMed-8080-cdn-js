@@ -3,7 +3,10 @@ function text(value) {
 }
 
 function normalize(value) {
-  return text(value).toLowerCase().replace(/[\s_\-/()[\]{}、，,;；:：]+/g, "");
+  return text(value)
+    .toLowerCase()
+    .replace(/gamma[-\s]*glutamyl[-\s]*transferase|γ[-\s]*谷氨酰基?转移酶?|伽马[-\s]*谷氨酰基?转移酶?|谷氨酰基转移酶|谷氨酰转移酶|ggt/g, "谷氨酰转移酶")
+    .replace(/[\s_\-/()[\]{}、，,;；:：]+/g, "");
 }
 
 function semanticKey(value) {
@@ -32,7 +35,7 @@ function numeric(value) {
 }
 
 function evaluateArithmetic(expression, values) {
-  const source = expression.replace(/\b(LLN|ULN|lab value)\b/gi, (name) => {
+  const source = expression.replace(/\b(BASE_LLN|BASE_ULN|baseline|LLN|ULN|lab value)\b/gi, (name) => {
     const key = name.toLowerCase() === "lab value" ? "value" : name.toLowerCase();
     return Number.isFinite(values[key]) ? String(values[key]) : "NaN";
   }).replace(/\s*x\s*/gi, "*");
@@ -45,7 +48,6 @@ function evaluateGradeCondition(condition, values) {
   if (!raw || raw === "-") return false;
   return raw.replace(/[()]/g, "").split(/\s+or\s+/).some((branch) =>
     branch.split(/\s+and\s+/).every((clause) => {
-      if (/baseline|base_lln|base_uln/.test(clause)) return false;
       const parts = clause.split(/\s*(<=|>=|<|>)\s*/);
       if (parts.length < 3 || parts.length % 2 === 0) return false;
       for (let index = 1; index < parts.length; index += 2) {
@@ -67,8 +69,8 @@ export function buildCtcGrd(patient, ctcRows) {
   const rows = ctcRows.filter((row) => row["LBTEST_CN"]);
   patient.labae_grd = (patient.labae_pt_chk || []).map((lab) => {
     const value = numeric(lab.result);
-    const lln = numeric(lab.referenceLow || lab.standardLow || lab.referenceRange?.split(" - ")[0]);
-    const uln = numeric(lab.referenceHigh || lab.standardHigh || lab.referenceRange?.split(" - ")[1]);
+    const lln = numeric(lab.LLN);
+    const uln = numeric(lab.ULN);
     const unit = normalize(lab.standardUnit || lab.unit);
     const testName = normalize(lab["HRSTD LBTEST-CN"]);
     let direction = "";
@@ -77,7 +79,14 @@ export function buildCtcGrd(patient, ctcRows) {
     const candidates = rows.filter((row) => normalize(row["LBTEST_CN"]) === testName && normalize(row["LBSTRESU"]) === unit);
     const directional = direction ? candidates.filter((row) => row["LBTOXDIR"] === direction) : [];
     const rule = directional[0] || null;
-    const values = { value, lln, uln };
+    const values = {
+      value,
+      lln,
+      uln,
+      baseline: numeric(lab.baseline),
+      base_lln: numeric(lab.BASE_LLN),
+      base_uln: numeric(lab.BASE_ULN),
+    };
     let labAeGrd = "Grade 0";
     if (rule) {
       for (let grade = 4; grade >= 1; grade -= 1) {
@@ -103,7 +112,7 @@ export function buildCtcGrd(patient, ctcRows) {
 }
 
 function gradeNumber(value) {
-  const match = text(value).match(/Grade\s*(\d+)/i);
+  const match = text(value).match(/(?:grade|g)?\s*([0-9]+)/i);
   return match ? Number(match[1]) : 0;
 }
 
@@ -205,7 +214,7 @@ function createDummySv(patients) {
     (patient.svRows || []).forEach((row) => {
       const visit = text(row.visit);
       const date = Number.isFinite(row.date) ? row.date : parseDate(row.date);
-      if (!visit || !Number.isFinite(date)) return;
+      if (!visit || /unscheduled|计划外/i.test(visit) || !Number.isFinite(date)) return;
       const current = grouped.get(visit) || { visitName: visit, start: date, end: date };
       current.start = Math.min(current.start, date);
       current.end = Math.max(current.end, date);
@@ -226,21 +235,28 @@ function selectDummySvVisit(visits, date) {
   if (!visits.length || !Number.isFinite(date)) return null;
   if (date < visits[0].startSortableDate) return visits[0];
 
-  // 取最后一个 start <= 采样日期的访视：边界日期命中后一个访视，符合 T1/T2 示例。
   let selected = null;
   for (const visit of visits) {
-    if (visit.startSortableDate <= date && date <= visit.endSortableDate) selected = visit;
+    if (date < visit.startSortableDate) return selected || visits[0];
+    if (date <= visit.endSortableDate) selected = visit;
   }
   if (selected) return selected;
-  return visits.find((visit) => visit.startSortableDate > date) || visits[visits.length - 1];
+  return visits[visits.length - 1];
 }
 
 function deriveLabVisitNames(patient) {
+  const visits = patient.dummy_sv || [];
   patient.labAeList = (patient.labAeList || []).map((lab) => {
+    const originalVisitName = text(lab.rawVisitLabel || lab.visitLabel);
+    const isUnscheduled = /unscheduled|计划外/i.test(originalVisitName);
+    const matchedVisit = isUnscheduled
+      ? selectDummySvVisit(visits, lab.sortableDate)
+      : null;
     return {
       ...lab,
-      // Lab 数据没有“计划外”字段，原访视名称即为计划内访视名称。
-      访视名称_NEW_LB: text(lab.visitLabel),
+      访视名称_NEW_LB: isUnscheduled && matchedVisit
+        ? `${text(matchedVisit.visitName)}_${originalVisitName}`
+        : text(lab.visitLabel),
     };
   });
 }
@@ -271,6 +287,38 @@ function buildLabaePtChk(patient, mappingData) {
   });
 }
 
+function isScreeningVisit(value) {
+  const visit = text(value).toLowerCase().replace(/[\s_\-()[\]{}、，,;；:：]+/g, "");
+  return visit === "筛选期" || visit === "筛选" || visit === "screening" || visit.includes("筛选期screening");
+}
+
+function buildBase(patient) {
+  const labs = patient.labae_pt_chk || [];
+  const baselineByTest = new Map();
+  labs.forEach((lab, index) => {
+    if (!isScreeningVisit(lab.visitLabel)) return;
+    const test = text(lab["HRSTD LBTEST-CN"]);
+    if (!test) return;
+    const current = baselineByTest.get(test);
+    const sortableDate = Number.isFinite(lab.sortableDate) ? lab.sortableDate : Number.MAX_SAFE_INTEGER;
+    const sourceOrder = Number.isFinite(lab.sourceOrder) ? lab.sourceOrder : index;
+    if (!current || sortableDate < current.sortableDate ||
+        (sortableDate === current.sortableDate && sourceOrder < current.sourceOrder)) {
+      baselineByTest.set(test, { lab, sortableDate, sourceOrder });
+    }
+  });
+
+  labs.forEach((lab) => {
+    const baselineLab = baselineByTest.get(text(lab["HRSTD LBTEST-CN"]))?.lab;
+    lab.ABLFL = baselineLab === lab ? "Y" : "";
+    lab.baseline = baselineLab?.result || "";
+    lab.LLN = lab.referenceLow || lab.standardLow || lab.referenceRange?.split(" - ")[0] || "";
+    lab.ULN = lab.referenceHigh || lab.standardHigh || lab.referenceRange?.split(" - ")[1] || "";
+    lab.BASE_LLN = baselineLab?.referenceLow || baselineLab?.standardLow || baselineLab?.referenceRange?.split(" - ")[0] || "";
+    lab.BASE_ULN = baselineLab?.referenceHigh || baselineLab?.standardHigh || baselineLab?.referenceRange?.split(" - ")[1] || "";
+  });
+}
+
 function deriveAeVisitNames(patients) {
   patients.forEach((patient) => {
     const visits = patient.dummy_sv || [];
@@ -284,7 +332,17 @@ function deriveAeVisitNames(patients) {
         visitName_NEW: "",
       };
       const date = Number.isFinite(ae.sortableDate) ? ae.sortableDate : parseDate(ae.startDate);
-      const visit = visits.find((item) => date >= item.startSortableDate && date <= item.endSortableDate);
+      let visit = visits.find((item) => date >= item.startSortableDate && date <= item.endSortableDate);
+      if (!visit && Number.isFinite(date)) {
+        const nextIndex = visits.findIndex((item) => date < item.startSortableDate);
+        if (nextIndex > 0) {
+          const previousVisit = visits[nextIndex - 1];
+          const nextVisit = visits[nextIndex];
+          if (date > previousVisit.endSortableDate && date < nextVisit.startSortableDate) {
+            visit = previousVisit;
+          }
+        }
+      }
       if (visit) output.visitName_NEW = visit.visitName;
       return output;
     });
@@ -295,23 +353,71 @@ function buildLabaeAeLinked(patient) {
   const labRows = patient.labae_out || [];
   const aeRows = patient.ae_normalized || [];
   const participantCode = patient.patientId || "";
+  const blindDrugFields = [
+    "对盲态药物A采取措施", "与盲态药物A的关系",
+    "对盲态药物B采取措施", "与盲态药物B的关系",
+    "对盲态药物C采取措施", "与盲态药物C的关系",
+    "对盲态药物D采取措施", "与盲态药物D的关系",
+    "对盲态药物E采取措施", "与盲态药物E的关系",
+  ];
   const matches = [];
+  const matchedLabIndexes = new Set();
+  const matchedAeIndexes = new Set();
 
-  labRows.forEach((lab) => {
+  labRows.forEach((lab, labIndex) => {
+    const labGrade = gradeNumber(lab.LABAE_GRD);
+    if (labGrade < 1) return;
     const labParticipant = text(lab["参与者代码"] || participantCode);
-    const labTerms = [lab["检查PT"], lab["编码描述-CN"]].filter((value) => text(value));
-    aeRows.forEach((ae) => {
+    const labTerms = [lab["检查PT"], lab["编码描述-CN"], lab.LBTOXCN, lab.LBTEST_CN]
+      .filter((value) => text(value));
+    let matched = false;
+    aeRows.forEach((ae, aeIndex) => {
       const aeParticipant = text(ae["参与者代码"] || participantCode);
-      const aeTerms = [ae.PT_CN, ae.ptCn, ae.LLT_CN, ae.lltCn].filter((value) => text(value));
-      const isMatched = labTerms.some((labTerm) =>
+      const aeTerms = [ae.PT_CN, ae.ptCn, ae.LLT_CN, ae.lltCn, ae.name]
+        .filter((value) => text(value));
+      const isTestMatched = labTerms.some((labTerm) =>
         aeTerms.some((aeTerm) => semanticMatch(labTerm, aeTerm))
       );
-      if (labParticipant !== aeParticipant || !isMatched) return;
+      const labVisit = text(lab["访视名称_NEW_LB"]);
+      const aeVisit = text(ae.visitName_NEW);
+      const isVisitMatched = Boolean(labVisit) && Boolean(aeVisit) &&
+        (labVisit.includes(aeVisit) || aeVisit.includes(labVisit));
+      if (labParticipant !== aeParticipant || !isTestMatched || !isVisitMatched) return;
+      matched = true;
+      matchedLabIndexes.add(labIndex);
+      matchedAeIndexes.add(aeIndex);
+      const linkedAe = { ...ae };
+      blindDrugFields.forEach((field) => {
+        linkedAe[field] = ae[field] || "";
+      });
       matches.push({
         "参与者代码": participantCode,
         build_ctc_out: { ...lab },
-        ae_normalized: { ...ae },
+        ae_normalized: linkedAe,
       });
+    });
+    if (!matched) matchedLabIndexes.delete(labIndex);
+  });
+
+  labRows.forEach((lab, labIndex) => {
+    if (gradeNumber(lab.LABAE_GRD) < 1 || matchedLabIndexes.has(labIndex)) return;
+    matches.push({
+      "参与者代码": participantCode,
+      build_ctc_out: { ...lab },
+      ae_normalized: {},
+    });
+  });
+
+  aeRows.forEach((ae, aeIndex) => {
+    if (matchedAeIndexes.has(aeIndex)) return;
+    const linkedAe = { ...ae };
+    blindDrugFields.forEach((field) => {
+      linkedAe[field] = ae[field] || "";
+    });
+    matches.push({
+      "参与者代码": participantCode,
+      build_ctc_out: {},
+      ae_normalized: linkedAe,
     });
   });
   return matches;
@@ -325,6 +431,7 @@ export function deriveLabAe(patients, labAeData) {
     attachMappings(patient, mappingData);
     deriveLabVisitNames(patient);
     buildLabaePtChk(patient, mappingData);
+    buildBase(patient);
     buildCtcGrd(patient, labAeData?.ctc?.grades || []);
     buildCtcOut(patient);
     patient.labae_ae_linked = buildLabaeAeLinked(patient);
