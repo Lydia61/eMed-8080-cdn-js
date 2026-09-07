@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>8080-305 数据整理工具</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/Lydia61/eMed-8080-cdn-js@main/styles.css?v=20260908-1">
+  <script type="module" src="https://cdn.jsdelivr.net/gh/Lydia61/eMed-8080-cdn-js@main/app.js?v=20260908-1"></script>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand-block">
+        <p class="eyebrow">EDC Review</p>
+        <h1>8080-305 数据整理工具</h1>
+      </div>
+
+      <section class="panel upload-panel">
+        <div class="mode-toggle-wrap">
+          <button id="blindModeToggle" class="mode-toggle" type="button" aria-label="切换盲态模式" aria-pressed="false"></button>
+          <span id="blindModeLabel" class="mode-toggle-label">盲态模式</span>
+        </div>
+        <label class="upload-dropzone" for="excelFile">
+          <input id="excelFile" type="file" accept=".xlsx,.xls,.csv" multiple>
+          <span class="upload-title">上传 EDC Excel + 读取 AE 编码文件</span>
+          <span class="upload-subtitle">支持同时选择或拖拽两个文件</span>
+        </label>
+        <div id="uploadProgress" class="upload-progress" hidden>
+          <div class="upload-progress-track" aria-hidden="true">
+            <span id="uploadProgressBar" class="upload-progress-bar"></span>
+          </div>
+          <p id="uploadProgressText" class="upload-progress-text">准备读取文件...</p>
+        </div>
+        <p id="workbookName" class="panel-note">请选择 EDC Excel 和 AE 编码文件</p>
+      </section>
+
+      <section class="panel upload-panel lab-ae-upload-panel">
+        <div class="section-head compact">
+          <div>
+            <p class="section-kicker">Lab-AE Derivation</p>
+            <h2>Lab-AE 文件</h2>
+          </div>
+        </div>
+        <label class="upload-dropzone compact-upload" for="labAeMappingFile">
+          <input id="labAeMappingFile" type="file" accept=".xlsx,.xls">
+          <span class="upload-title">上传 Lab-AE Mapping关系文件</span>
+          <span class="upload-subtitle">读取 mapping关系 与 Mapping关系库</span>
+        </label>
+        <label class="upload-dropzone compact-upload" for="labAeCtcFile">
+          <input id="labAeCtcFile" type="file" accept=".csv,.xlsx,.xls">
+          <span class="upload-title">上传 lab-ctc-grade 文件</span>
+          <span class="upload-subtitle">读取 CTC 分级字段</span>
+        </label>
+        <div id="labAeProgress" class="upload-progress" hidden>
+          <div class="upload-progress-track" aria-hidden="true">
+            <span id="labAeProgressBar" class="upload-progress-bar"></span>
+          </div>
+          <p id="labAeProgressText" class="upload-progress-text">准备读取 Lab-AE 文件...</p>
+        </div>
+        <p id="labAeStatus" class="panel-note">尚未载入 Lab-AE 文件。</p>
+      </section>
+
+      <section class="panel filter-panel">
+        <div class="section-head compact">
+          <h2>患者筛选</h2>
+          <span id="patientCountBadge" class="badge">0 人</span>
+        </div>
+        <label class="field-label" for="patientSearch">编号检索</label>
+        <input id="patientSearch" class="text-input" type="search" placeholder="输入 CNXXXXX">
+
+        <label class="field-label" for="centerSelect">中心筛选</label>
+        <select id="centerSelect" class="select-input">
+          <option value="ALL">全部中心</option>
+        </select>
+
+        <label class="field-label" for="patientSelect">选择患者</label>
+        <select id="patientSelect" class="select-input">
+          <option value="">请先上传 Excel</option>
+        </select>
+
+        <div id="patientList" class="patient-list empty-list">
+          载入数据后会在这里显示患者列表
+        </div>
+      </section>
+
+      <section class="panel question-panel sidebar-question-panel">
+        <div class="ctcae-reference">
+          <div class="ctcae-head">
+            <p class="section-kicker">CTCAE Quick Ref</p>
+            <h3>AE等级参考</h3>
+            <p class="ctcae-note">单位默认按 x10^9/L 简写</p>
+          </div>
+          <div class="ctcae-list">
+            <article class="ctcae-item">
+              <strong>中性粒细胞计数降低</strong>
+              <p>G1 1.5到下限，G2 1.0到&lt;1.5，G3 0.5到&lt;1.0，G4 &lt;0.5</p>
+            </article>
+            <article class="ctcae-item">
+              <strong>白细胞数降低</strong>
+              <p>G1 3.0到下限，G2 2.0到&lt;3.0，G3 1.0到&lt;2.0，G4 &lt;1.0</p>
+            </article>
+            <article class="ctcae-item">
+              <strong>血红蛋白降低</strong>
+              <p>G1 100到下限，G2 80到&lt;100，G3 65到&lt;80，G4 &lt;65（g/L）</p>
+            </article>
+            <article class="ctcae-item">
+              <strong>血小板计数降低</strong>
+              <p>G1 75到下限，G2 50到&lt;75，G3 25到&lt;50，G4 &lt;25</p>
+            </article>
+            <article class="ctcae-item">
+              <strong>淋巴细胞计数降低</strong>
+              <p>G1 0.8到下限，G2 0.5到&lt;0.8，G3 0.2到&lt;0.5，G4 &lt;0.2</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+    </aside>
+
+    <main class="main-content">
+      <section class="hero-panel">
+        <div>
+          <p class="eyebrow">Patient View</p>
+          <h2 id="selectedPatientTitle">等待数据载入</h2>
+          <p id="selectedPatientSubtitle" class="muted">上传 Excel 后可在左侧按中心和患者编号筛选。</p>
+          <p id="selectedPatientStratification" class="muted">分层因素：未提供</p>
+          <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
+            <div id="aeActionBar"></div>
+            <div id="cmActionBar"></div>
+            <div id="labAeActionBar"></div>
+            <div id="questionActionBar"></div>
+          </div>
+        </div>
+        <div class="hero-hint">
+          <span class="hint-dot"></span>
+          <div id="heroHintContent">
+            <p class="hero-hint-title">重点数据提示</p>
+            <p>上传 Excel 后会在这里显示需要优先核查的患者级风险信息。</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel baseline-panel">
+        <div class="section-head">
+          <div>
+            <p class="section-kicker">Baseline</p>
+            <h3>基线数据</h3>
+          </div>
+        </div>
+        <div id="baselineGrid" class="baseline-grid">
+          <article class="baseline-card empty-card">暂无数据</article>
+        </div>
+      </section>
+
+      <section class="panel history-panel">
+        <div class="section-head">
+          <div>
+            <p class="section-kicker">Medical History</p>
+            <h3>既往史</h3>
+          </div>
+        </div>
+        <div id="historyList" class="history-list">
+          <article class="history-card empty-card">暂无既往史数据</article>
+        </div>
+      </section>
+
+      <section class="panel response-panel">
+        <div class="section-head">
+          <div>
+            <p class="section-kicker">Endpoint Events</p>
+            <h3>终点事件</h3>
+          </div>
+        </div>
+        <div id="responseList" class="response-list">
+          <article class="history-card empty-card">待更新</article>
+        </div>
+      </section>
+
+      <section class="panel systemic-panel">
+        <div class="section-head">
+          <div>
+            <p class="section-kicker">Systemic Anti-tumor Therapy</p>
+            <h3>系统性抗肿瘤治疗史</h3>
+          </div>
+        </div>
+        <div id="systemicList" class="history-list">
+          <article class="history-card empty-card">暂无系统性抗肿瘤治疗史</article>
+        </div>
+      </section>
+
+      <section class="panel labs-panel">
+        <div class="section-head">
+          <div>
+            <p class="section-kicker">Laboratory</p>
+            <h3>检查结果</h3>
+          </div>
+          <span id="labCountBadge" class="badge">0 组</span>
+        </div>
+        <div id="labsGrid" class="labs-grid">
+          <article class="lab-card empty-card">暂无实验室结果</article>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

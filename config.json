@@ -4,11 +4,11 @@
     "version": "20260903-2"
   },
   "assets": {
-    "css": "https://cdn.jsdelivr.net/gh/Lydia61/eMed-8080-cdn-js@main/styles.css",
+    "css": "https://cdn.jsdelivr.net/gh/Lydia61/eMed-8080-cdn-js@main/styles.css?v=20260908-1",
     "js": {
-      "app": "https://cdn.jsdelivr.net/gh/Lydia61/eMed-8080-cdn-js@main/app.js",
-      "edcParser": "https://cdn.jsdelivr.net/gh/Lydia61/eMed-8080-cdn-js@main/edc_parser.js",
-      "medicalEngine": "https://cdn.jsdelivr.net/gh/Lydia61/eMed-8080-cdn-js@main/medical_engine_labae.js"
+      "app": "https://cdn.jsdelivr.net/gh/Lydia61/eMed-8080-cdn-js@main/app.js?v=20260908-1",
+      "edcParser": "https://cdn.jsdelivr.net/gh/Lydia61/eMed-8080-cdn-js@main/edc_parser.js?v=20260908-1",
+      "medicalEngine": "https://cdn.jsdelivr.net/gh/Lydia61/eMed-8080-cdn-js@main/medical_engine_labae.js?v=20260908-1"
     },
     "xlsx": "https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"
   }
