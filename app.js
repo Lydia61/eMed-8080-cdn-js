@@ -1432,10 +1432,11 @@ function renderPatientView() {
       });
       return linked || { "参与者代码": patient.patientId, build_ctc_out: lab, ae_normalized: {} };
     });
-  elements.labAeActionBar.innerHTML = labAeRecords.length
+  const labAeReady = Boolean(state.labAeData && Array.isArray(patient.labae_out));
+  elements.labAeActionBar.innerHTML = labAeReady
     ? `<button class="ae-open-btn" id="labAeOpenBtn">&#128202; 查看Lab-AE（${labAeRecords.length} 条）</button>`
     : "";
-  if (labAeRecords.length) {
+  if (labAeReady) {
     document.getElementById("labAeOpenBtn").addEventListener("click", () => openLabAeWindow(patient, labAeRecords));
   }
   elements.labCountBadge.textContent = `${patient.groupedLabs.length} 组`;
