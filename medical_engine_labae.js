@@ -299,10 +299,14 @@ function buildLabaeAeLinked(patient) {
 
   labRows.forEach((lab) => {
     const labParticipant = text(lab["参与者代码"] || participantCode);
+    const labTerms = [lab["检查PT"], lab["编码描述-CN"]].filter((value) => text(value));
     aeRows.forEach((ae) => {
       const aeParticipant = text(ae["参与者代码"] || participantCode);
-      const aePt = ae.PT_CN || ae.ptCn || ae.LLT_CN || ae.lltCn || ae.name;
-      if (labParticipant !== aeParticipant || !semanticMatch(lab["检查PT"], aePt)) return;
+      const aeTerms = [ae.PT_CN, ae.ptCn, ae.LLT_CN, ae.lltCn].filter((value) => text(value));
+      const isMatched = labTerms.some((labTerm) =>
+        aeTerms.some((aeTerm) => semanticMatch(labTerm, aeTerm))
+      );
+      if (labParticipant !== aeParticipant || !isMatched) return;
       matches.push({
         "参与者代码": participantCode,
         build_ctc_out: { ...lab },
