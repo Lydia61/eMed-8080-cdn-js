@@ -8,7 +8,7 @@
     const CDN_CONFIG_URL = "https://cdn.jsdelivr.net/gh/Lydia61/eMed-8080-cdn-js@main/config.json";
 
     function pinCdnVersion(url) {
-      return String(url).replace("@main/", `@${CDN_COMMIT}/`);
+      return String(url);
     }
 
     function loadStylesheet(url) {

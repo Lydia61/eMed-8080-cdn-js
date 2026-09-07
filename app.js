@@ -1417,15 +1417,26 @@ function renderPatientView() {
   if (patient.cmList.length) {
     document.getElementById("cmOpenBtn").addEventListener("click", () => openCmWindow(patient));
   }
-  const labAeLinked = (patient.labae_ae_linked || []).filter((record) => {
-    const grade = Number.parseInt(String(record?.build_ctc_out?.LABAE_GRD || "").replace(/[^0-9]/g, ""), 10) || 0;
-    return Boolean(record?.build_ctc_out?.LBTEST_CN) && grade >= 1;
-  });
-  elements.labAeActionBar.innerHTML = labAeLinked.length
-    ? `<button class="ae-open-btn" id="labAeOpenBtn">&#128202; 查看Lab-AE（${labAeLinked.length} 条）</button>`
+  const linkedLabAe = patient.labae_ae_linked || [];
+  const labAeRecords = (patient.labae_out || [])
+    .filter((lab) => {
+      const grade = Number.parseInt(String(lab?.LABAE_GRD || "").replace(/[^0-9]/g, ""), 10) || 0;
+      return Boolean(lab?.LBTEST_CN || lab?.["HRSTD LBTEST-CN"]) && grade >= 1;
+    })
+    .map((lab) => {
+      const linked = linkedLabAe.find((record) => {
+        const linkedLab = record?.build_ctc_out || {};
+        return String(linkedLab.LBTEST_CN || linkedLab["HRSTD LBTEST-CN"] || "") ===
+          String(lab.LBTEST_CN || lab["HRSTD LBTEST-CN"] || "") &&
+          String(linkedLab.collectionDate || "") === String(lab.collectionDate || "");
+      });
+      return linked || { "参与者代码": patient.patientId, build_ctc_out: lab, ae_normalized: {} };
+    });
+  elements.labAeActionBar.innerHTML = labAeRecords.length
+    ? `<button class="ae-open-btn" id="labAeOpenBtn">&#128202; 查看Lab-AE（${labAeRecords.length} 条）</button>`
     : "";
-  if (labAeLinked.length) {
-    document.getElementById("labAeOpenBtn").addEventListener("click", () => openLabAeWindow(patient, labAeLinked));
+  if (labAeRecords.length) {
+    document.getElementById("labAeOpenBtn").addEventListener("click", () => openLabAeWindow(patient, labAeRecords));
   }
   elements.labCountBadge.textContent = `${patient.groupedLabs.length} 组`;
   elements.heroHintContent.innerHTML = renderCriticalHints(patient.criticalHints);
