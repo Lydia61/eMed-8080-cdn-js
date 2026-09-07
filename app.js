@@ -190,7 +190,7 @@ async function handleFileSelection(event) {
     const codingFiles = classified.filter((entry) => entry.isCoding).map((entry) => entry.file);
 
     if (codingFiles.length) {
-      const codingMaps = await Promise.all(codingFiles.map(parseAeCodingFile));
+      const codingMaps = await Promise.all(codingFiles.map((file) => parseAeCodingFile(file)));
       state.aeCoding = new Map(codingMaps.flatMap((codingMap) => codingMap.entries()));
       state.aeCodingName = codingFiles.map((file) => file.name).join("、");
       if (state.patients.size) {
