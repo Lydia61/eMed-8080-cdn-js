@@ -86,9 +86,6 @@ function bindElements() {
   elements.uploadDropzone               = document.querySelector(".upload-dropzone");
   elements.labAeMappingInput            = document.getElementById("labAeMappingFile");
   elements.labAeCtcInput                = document.getElementById("labAeCtcFile");
-  elements.labAeProgress                = document.getElementById("labAeProgress");
-  elements.labAeProgressBar             = document.getElementById("labAeProgressBar");
-  elements.labAeProgressText            = document.getElementById("labAeProgressText");
   elements.labAeStatus                 = document.getElementById("labAeStatus");
   elements.blindModeToggle             = document.getElementById("blindModeToggle");
   elements.blindModeLabel              = document.getElementById("blindModeLabel");
@@ -152,18 +149,16 @@ async function handleLabAeFileSelection() {
   try {
     elements.labAeStatus.textContent = "正在解析 Lab-AE 文件...";
     state.labAeData = await parseLabAeFiles(mappingFile, ctcFile, ({ percent, message }) => {
-      showLabAeProgress(percent, message);
+      showUploadProgress(percent, message);
     });
     if (state.patients.size) {
       deriveLabAe(state.patients, state.labAeData);
       renderAll();
     }
-    showLabAeProgress(100, "Lab-AE 解析完成");
     elements.labAeStatus.textContent = `已解析：Mapping ${state.labAeData.mapping.mapping.length} 行，检查项库 ${state.labAeData.mapping.mappingLibrary.length} 行，CTC ${state.labAeData.ctc.grades.length} 行。`;
     window.dispatchEvent(new CustomEvent("lab-ae-data-ready", { detail: { data: state.labAeData, patients: state.patients } }));
   } catch (error) {
     console.error(error);
-    showLabAeProgress(100, "Lab-AE 读取失败");
     elements.labAeStatus.textContent = "Lab-AE 文件解析失败，请检查工作表名称和字段。";
   }
 }
@@ -262,13 +257,6 @@ function showUploadProgress(percent, message) {
   elements.uploadProgress.hidden = false;
   elements.uploadProgressBar.style.width = `${safePercent}%`;
   elements.uploadProgressText.textContent = `${safePercent}% · ${message}`;
-}
-
-function showLabAeProgress(percent, message) {
-  const safePercent = Math.max(0, Math.min(100, Math.round(percent)));
-  elements.labAeProgress.hidden = false;
-  elements.labAeProgressBar.style.width = `${safePercent}%`;
-  elements.labAeProgressText.textContent = `${safePercent}% · ${message}`;
 }
 
 function clearUploadProgressHideTimer() {
